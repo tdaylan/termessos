@@ -112,11 +112,6 @@ def ttvr_mc18():
     #2841 2456896.1478 0.0008
     #3223 2457255.7832 0.00030 -0.00029
     #3291 2457319.8010 0.00039 -0.00038
-    
-
-
-
-
 
     tranobsv = np.array(tranobsv)
     itrnobsv = (tranobsv[:, 0] - epocmodlline) // perimodlline
@@ -125,34 +120,13 @@ def ttvr_mc18():
     tranmodlmc18line = retr_modlline(itrn, epocmc18line, perimc18line)
     tranmodlmc18quad = retr_modlquad(itrn, epocmc18quad, perimc18quad, deltmc18quad)
     
-    
     tranmodlmc18lineeval = retr_modlline(itrnobsv, epocmodlline, perimodlline)
     
-    
     objttranobsv = Time(tranobsv[:, 0], format='jd', scale='utc')
-    
-    
-    print 'tranobsv'
-    summgene(tranobsv)
-    print 'itrnobsv'
-    summgene(itrnobsv)
-    print 'tranmodlmc18lineeval'
-    summgene(tranmodlmc18lineeval)
-    print 'itrn'
-    summgene(itrn)
-    print 'tranmodlmc18line'
-    summgene(tranmodlmc18line)
     
     resiobsv = tranobsv[:, 0] - tranmodlmc18lineeval
     resimodlline = tranmodlmc18line - tranmodlmc18line
     resimodlquad = tranmodlmc18quad - tranmodlmc18line
-    
-    print 'resiobsv'
-    summgene(resiobsv)
-    print 'resimodlline'
-    summgene(resimodlline)
-    print 'resimodlquad'
-    summgene(resimodlquad)
     
     figr, axi1 = plt.subplots()
     figr.subplots_adjust(bottom=0.2)
@@ -163,8 +137,6 @@ def ttvr_mc18():
     axi0.set_xlabel(r"BJD")
     axi1.set_xlabel(r"Transit Index")
     
-    print 'tranmodlmc18quad'
-    summgene(tranmodlmc18quad)
     axi1.scatter(itrnobsv, resiobsv, label='Observed', color='black')
     axi1.plot(itrn, resimodlline, label='Linear (McDonald 2018)')
     axi1.plot(itrn, resimodlquad, label='Quadratic (McDonald 2018)')
@@ -228,24 +200,8 @@ def retr_llik(para, time, numbepoc, ttvrobsv, ttvrstdvobsv, indxswep, listttvrmo
         phas = para[1]
         ampl = para[2]
         peri = para[3]
-        #print 'offs'
-        #print offs
-        #print 'phas'
-        #print phas
-        #print 'ampl'
-        #print ampl
-        #print 'peri'
-        #print peri
-        #print
-
         ttvrmodl = retr_ttvrmodl(time, offs, phas, ampl, peri)
     
-    #print 'para'
-    #print para
-    #print 'indxswep'
-    #print indxswep
-    #print
-
     if ebartype == 'asym':
         t0 = timemodl.time()
         if intptype == 'bins':
@@ -289,7 +245,7 @@ def retr_llik(para, time, numbepoc, ttvrobsv, ttvrstdvobsv, indxswep, listttvrmo
 
     else:
         llik = -0.5 * np.sum((ttvrmodl - ttvrobsv)**2 / ttvrstdvobsv**2)
-   
+    
     if indxswep % 1000 == 0:
         listttvrmodl.append(ttvrmodl)
     
@@ -304,30 +260,52 @@ def retr_llik(para, time, numbepoc, ttvrobsv, ttvrstdvobsv, indxswep, listttvrmo
 pathdata = os.environ['TESS_TTVR_DATA_PATH'] + '/'
 os.system('mkdir -p %s' % pathdata)
 
+peri = 0.9414518
 # get Luke's posterior
-path = pathdata + 'luke.csv'
-tesspost = np.loadtxt(path, delimiter=',')
-time = tesspost[:, 0]
-numbepoc = time.size
-tesspost[:, 1] -= 0.9414518 * np.arange(numbepoc)
-ttvrobsv = tesspost[:, 1]
-ttvrstdvobsv = 0.5 * (tesspost[:, 2] + tesspost[:, 3])
+
+ttvrobsv = [[], []]
+ttvrstdvobsv = [[], []]
+for k in range(2):
+    if k == 0:
+        path = pathdata + 'sector_2.csv'
+    if k == 1:
+        path = pathdata + 'sector_3.csv'
+    
+    tesspost = np.loadtxt(path, delimiter=',')
+    ttvrobsv[k] = tesspost[:, 0]
+    ttvrstdvobsv[k] = tesspost[:, 1]
+ttvrobsv = np.concatenate(ttvrobsv)
+ttvrstdvobsv = np.concatenate(ttvrstdvobsv)
+print 'ttvrobsv'
+print ttvrobsv
+print ttvrobsv.shape
+indxepocobsv = np.round((ttvrobsv - np.amin(ttvrobsv)) / peri)
+print 'indxepocobsv'
+print indxepocobsv
+print indxepocobsv.shape
+print
+
+numbepoc = indxepocobsv.size
+indxepoc = np.arange(numbepoc)
+
+ttvrobsv -= peri * indxepocobsv
+
+time = np.copy(indxepocobsv)
 
 # temp
 numbsamp = 1000000
 numbsampburn = 50000
 
-indxepoc = np.arange(numbepoc)
 
 ttvrtype = 'cons'
-ttvrtype = 'sinu'
+#ttvrtype = 'sinu'
 
 ebartype = 'symm'
 #ebartype = 'asym'
 
-samptype = 'emce'
+#samptype = 'emce'
 samptype = 'nest'
-samptype = 'mlik'
+#samptype = 'mlik'
 
 intptype = 'kdne'
 intptype = 'spln'
@@ -366,7 +344,7 @@ if ebartype == 'asym':
     
     tesspdfn = [[] for t in indxepoc]
     for t in indxepoc:
-        path = pathdata + 'wasp-18b_posteriors/100100827_mandelagol_fit_samples_4d_t%03d_empiricalerrs.h5' % t
+        path = pathdata + 'wasp-18b_posteriors/sector2/100100827_mandelagol_fit_samples_4d_t%03d_empiricalerrs.h5' % t
         filearry = h5py.File(path, 'r')
         tesspdfn[t] = filearry['mcmc/chain'][:, :, 3].flatten()
         tesspdfn[t] -= 0.9414518 * t
@@ -442,6 +420,7 @@ if ebartype == 'asym':
             plt.savefig(path)
             plt.close()
 
+indxpara = np.arange(numbpara)
 limtpara = np.empty((2, numbpara))
 # offs
 #limtpara[0, 0] = 1354.4560
@@ -467,13 +446,6 @@ if True or not os.path.exists(pathsave):
     dictllik = [time, numbepoc, ttvrobsv, ttvrstdvobsv, indxswep, listttvrmodl, ttvrtype, binsttvr, histttvr, listskewnorm]
     dicticdf = [numbepoc]
 
-    if samptype == 'mlik':
-        
-        bnds = [limtpara[:, k] for k in indxpara]
-        res = optimize.minimize(retr_llik, np.mean(limtpara, axis=0), method='TNC', bounds=bnds, tol=1e-10, args=dictllik)
-        paramlik = res.x
-
-
     if samptype == 'emce':
         numbwalk = 50
         indxwalk = np.arange(numbwalk)
@@ -483,9 +455,6 @@ if True or not os.path.exists(pathsave):
             meannorm = (limtpara[0, :] + limtpara[1, :]) / 2.
             stdvnorm = (limtpara[0, :] - limtpara[1, :]) / 10.
             parainit[k]  = (scipy.stats.truncnorm.rvs((limtpara[0, :] - meannorm) / stdvnorm, (limtpara[1, :] - meannorm) / stdvnorm)) * stdvnorm + meannorm
-            #parainit[k][1]  = 0.0004 * np.random.randn()
-            #parainit[k][2]  = 15. * (1. + 1e-1 * np.random.randn())
-            #parainit[k][3]  = 1354.45800 * (1. + 1e-6 * np.random.randn())
         numbsampwalk = numbsamp / numbwalk
         numbsampwalkburn = numbsampburn / numbwalk
 
@@ -521,7 +490,6 @@ else:
     numbsamp = objtsave['samples'].shape[0]
 
 indxsamp = np.arange(numbsamp)
-indxpara = np.arange(numbpara)
 
 # plot the posterior
 
@@ -618,8 +586,6 @@ else:
     plt.savefig(path)
     plt.close()
 
-    
-
 
 ### sample model ttvr
 numbttvrmodl = 100
@@ -628,8 +594,13 @@ indxsamprand = np.random.choice(indxsamp, numbttvrmodl, replace=False)
 yerr = np.empty((2, numbepoc))
 yerr[0, :] = ttvrstdvobsv
 yerr[1, :] = ttvrstdvobsv
+print 'ttvrstdvobsv'
+print ttvrstdvobsv
+print 'yerr'
+print yerr
+
 numbepocfine = 100
-indxepocfine = np.linspace(0., numbepoc - 1, numbepocfine)
+indxepocfine = np.linspace(0., np.amax(indxepocobsv), numbepocfine)
 
 ttvrmodlfine = np.empty((numbsamp, numbepocfine))
 for k in indxttvrmodl:
@@ -651,24 +622,28 @@ for k in indxttvrmodl:
         ttvrmodlfine[k, :] = retr_ttvrmodl(indxepocfine, offs, phas, ampl, peri)
 
 figr, axis = plt.subplots()
-axis.errorbar(indxepoc, ttvrobsv, yerr=yerr, color='black', marker='o', ls='')
+axis.errorbar(indxepocobsv, ttvrobsv, yerr=yerr, color='black', marker='o', ls='')
 for k in indxttvrmodl:
     axis.plot(indxepocfine, ttvrmodlfine[k, :], alpha=0.05, color='b')
+axis.set_xlabel('Epoch index')
+axis.set_ylabel('Transit time [BTJD]')
 path = pathdata + 'modl_%s.pdf' % ttvrtype
 print 'Writing to %s...' % path
 plt.savefig(path)
 plt.close()
 
-indxepoc = np.delete(indxepoc, [14, 15])
+indxepocobsv = np.delete(indxepocobsv, [14, 15])
 ttvrobsv = np.delete(ttvrobsv, [14, 15])
 yerrcopy = np.copy(yerr)
 yerr = np.empty((2, numbepoc - 2))
 yerr[:, :14] = yerrcopy[:, :14]
 yerr[:, 14:] = yerrcopy[:, 16:]
 figr, axis = plt.subplots()
-axis.errorbar(indxepoc, ttvrobsv, yerr=yerr, color='black', marker='o', ls='')
+axis.errorbar(indxepocobsv, ttvrobsv, yerr=yerr, color='black', marker='o', ls='')
 for k in indxttvrmodl:
     axis.plot(indxepocfine, ttvrmodlfine[k, :], alpha=0.05, color='b')
+axis.set_xlabel('Epoch index')
+axis.set_ylabel('Transit time [BTJD]')
 path = pathdata + 'modlexcl_%s.pdf' % ttvrtype
 print 'Writing to %s...' % path
 plt.savefig(path)
