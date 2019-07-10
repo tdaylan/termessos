@@ -13,19 +13,11 @@ import matplotlib.pyplot as plt
 import h5py 
 import os, sys
 import emcee
+import tdpy.mcmc
 
 import dynesty
 from dynesty import plotting as dyplot
 from dynesty import utils as dyutils
-
-def summgene(arry):
-    try: 
-        print np.amin(arry)
-        print np.amax(arry)
-        print np.mean(arry)
-        print arry.shape
-    except:
-        print arry
 
 
 def icdf(para, numbepoc):
@@ -97,6 +89,9 @@ time = np.copy(indxepocobsv)
 # 'emce' or 'nest'
 samptype = sys.argv[1]
 
+pathmetd = pathdata + samptype + '/'
+os.system('mkdir -p %s' % pathmetd)
+
 listttvrtype = ['cons', 'sinu']
 for ttvrtype in listttvrtype:
     if ttvrtype == 'cons':
@@ -105,8 +100,8 @@ for ttvrtype in listttvrtype:
         numbpara = 4
     
     if samptype == 'emce':
-        numbsamp = 100000
-        numbsampburn = 50000
+        numbsamp = 200000
+        numbsampburn = 20000
     
     numbdoff = numbepoc - numbpara
     
@@ -115,17 +110,27 @@ for ttvrtype in listttvrtype:
     # offs
     limtpara[0, 0] = -0.2
     limtpara[1, 0] = 0.2
+    listlablpara = ['$C$ [minutes]']
     if ttvrtype == 'sinu':
         # phas
-        limtpara[0, 1] = 0.8 * np.pi
-        limtpara[1, 1] = 1.5 * np.pi
+        limtpara[0, 1] = 0.#np.pi
+        limtpara[1, 1] = 2. * np.pi
         # ampl
         limtpara[0, 2] = 0.
-        limtpara[1, 2] = 1. * np.pi
+        limtpara[1, 2] = 1.
         # peri
-        limtpara[0, 3] = 14.
-        limtpara[1, 3] = 22.
+        limtpara[0, 3] = 2.
+        limtpara[1, 3] = 15.
     
+        listlablpara += ['$\phi$', '$A$ [minutes]', '$P$ [epochs]']
+    
+    numbbins = 60
+    indxbins = np.arange(numbbins)
+    binspara = np.empty((numbbins + 1, numbpara)) 
+    for k in indxpara:
+        binspara[:, k] = np.linspace(limtpara[0, k], limtpara[1, k], numbbins + 1)
+    meanpara = (binspara[1:, :] + binspara[:-1, :]) / 2.
+
     dictllik = [time, numbepoc, ttvrobsv, ttvrstdvobsv, ttvrtype]
     dicticdf = [numbepoc]
     
@@ -169,6 +174,14 @@ for ttvrtype in listttvrtype:
         samppara = dyutils.resample_equal(results.samples, weights)
         assert samppara.size == results.samples.size
     
+    if samptype == 'emce':
+        listsamp = objtsave.flatchain
+        listllik = objtsave.flatlnprobability
+    else:
+        listsamp = samppara[:, k]
+   
+    indxsampmlik = np.argmax(listllik)
+
     # plot the posterior
     ## parameter
     ### trace
@@ -177,30 +190,35 @@ for ttvrtype in listttvrtype:
             figr, axis = plt.subplots()
             for i in indxwalk:
                 axis.plot(indxsampwalk[::10], objtsave.chain[i, ::10, k])
-            path = pathdata + 'tracwalk%04d_%s.pdf' % (k, ttvrtype)
+            path = pathdata + '%s/tracwalk%04d_%s.pdf' % (samptype, k, ttvrtype)
             print 'Writing to %s...' % path
             plt.savefig(path)
             plt.close()
         
     ### histogram
     for k in indxpara:
-        figr, axis = plt.subplots()
-        if samptype == 'emce':
-            axis.hist(objtsave.flatchain[:, k]) 
-        else:
-            axis.hist(samppara[:, k]) 
-        path = pathdata + 'hist%04d_%s.pdf' % (k, ttvrtype)
+        figr, axis = plt.subplots(figsize=(6, 4))
+        axis.hist(listsamp[:, k], numbbins) 
+        axis.set_ylabel('$N_{samp}$')
+        axis.set_xlabel(listlablpara[k])
+        path = pathdata + '%s/hist%04d_%s.pdf' % (samptype, k, ttvrtype)
+        plt.tight_layout()
         print 'Writing to %s...' % path
         plt.savefig(path)
         plt.close()
     
+    path = pathdata + '%s/' % samptype
+    strgplot = 'post_%s' % ttvrtype
+
+    listparamlik = listsamp[indxsampmlik, :]
+    tdpy.mcmc.plot_grid(path, strgplot, listsamp, listlablpara, listvarbdraw=[listparamlik], numbbinsplot=numbbins)
     
     if samptype == 'nest':
         for keys in objtsave:
             if isinstance(objtsave[keys], np.ndarray) and objtsave[keys].size == numbsamp:
                 figr, axis = plt.subplots()
                 axis.plot(indxsamp, objtsave[keys])
-                path = pathdata + '%s_%s.pdf' % (keys, ttvrtype)
+                path = pathdata + '%s/%s_%s.pdf' % (samptype, keys, ttvrtype)
                 print 'Writing to %s...' % path
                 plt.savefig(path)
     else:
@@ -211,16 +229,25 @@ for ttvrtype in listttvrtype:
                 axis.plot(indxsampwalk[::10], objtsave.lnprobability[::10, i])
         else:
             axis.plot(indxsamp, objtsave['logl'])
-        path = pathdata + 'llik_%s.pdf' % ttvrtype
+        path = pathdata + '%s/llik_%s.pdf' % (samptype, ttvrtype)
         print 'Writing to %s...' % path
         plt.savefig(path)
         plt.close()
     
         chi2 = -2. * objtsave.lnprobability
+        
         print 'Posterior-mean chi2: '
         print np.mean(chi2)
         print 'Posterior-mean chi2 per dof: '
         print np.mean(chi2) / numbdoff
+        print 'Minimum chi2: '
+        print np.amin(chi2)
+        print 'Minimum chi2 per dof: '
+        print np.amin(chi2) / numbdoff
+        print 'Posterior-mean llik: '
+        print np.mean(objtsave.lnprobability)
+        print 'Maximum llik: '
+        print np.amax(objtsave.lnprobability)
     
     
     ### sample model ttvr
@@ -231,7 +258,7 @@ for ttvrtype in listttvrtype:
     yerr[0, :] = ttvrstdvobsv
     yerr[1, :] = ttvrstdvobsv
     
-    numbepocfine = 100
+    numbepocfine = 1000
     indxepocfine = np.linspace(np.amin(indxepocobsv), np.amax(indxepocobsv), numbepocfine)
     ttvrmodlfine = np.empty((numbsamp, numbepocfine))
     for k in indxttvrmodl:
@@ -248,6 +275,27 @@ for ttvrtype in listttvrtype:
             peri = objttemp[k, 3]
             ttvrmodlfine[k, :] = retr_ttvrmodl(indxepocfine, offs, phas, ampl, peri)
     
+    if ttvrtype == 'cons':
+        mlikcons = np.amax(listllik)
+
+    if ttvrtype == 'sinu':
+        llikperi = np.empty(numbbins)
+        for m in indxbins:
+            indxsampthis = np.where((listsamp[:, -1] < binspara[m+1, -1]) & (listsamp[:, -1] > binspara[m, -1]))
+            llikperi[m] = np.amax(listllik[indxsampthis])
+        
+        figr, axis = plt.subplots(figsize=(6, 3))
+        axis.plot(meanpara[:, -1], -2. * llikperi, label='Sinusoidal')
+        axis.axhline(-2. * mlikcons, label='Constant', color='orange')
+        axis.set_xlabel('Period [epochs]')
+        axis.set_ylabel('$\chi^2$')
+        plt.tight_layout()
+        plt.legend()
+        path = pathdata + '%s/chi2peri_%s.pdf' % (samptype, ttvrtype)
+        print 'Writing to %s...' % path
+        plt.savefig(path)
+        plt.close()
+    
     figr, axis = plt.subplots(figsize=(6, 3))
     axis.errorbar(indxepocobsv, ttvrobsv, yerr=yerr, color='black', marker='o', ls='')
     for k in indxttvrmodl:
@@ -255,7 +303,7 @@ for ttvrtype in listttvrtype:
     axis.set_xlabel('Epoch')
     axis.set_ylabel('Transit timing residuals [minute]')
     plt.tight_layout()
-    path = pathdata + 'modl_%s.pdf' % ttvrtype
+    path = pathdata + '%s/modl_%s.pdf' % (samptype, ttvrtype)
     print 'Writing to %s...' % path
     plt.savefig(path)
     plt.close()
@@ -263,19 +311,19 @@ for ttvrtype in listttvrtype:
     ### nested sampling specific
     if samptype == 'nest':
         rfig, raxes = dyplot.runplot(results)
-        path = pathdata + 'dyne_runs_%s.pdf' % ttvrtype
+        path = pathdata + '%s/dyne_runs_%s.pdf' % (samptype, ttvrtype)
         print 'Writing to %s...' % path
         plt.savefig(path)
         plt.close()
         
         tfig, taxes = dyplot.traceplot(results)
-        path = pathdata + 'dyne_trac_%s.pdf' % ttvrtype
+        path = pathdata + '%s/dyne_trac_%s.pdf' % (samptype, ttvrtype)
         print 'Writing to %s...' % path
         plt.savefig(path)
         plt.close()
         
         cfig, caxes = dyplot.cornerplot(results)
-        path = pathdata + 'dyne_corn_%s.pdf' % ttvrtype
+        path = pathdata + '%s/dyne_corn_%s.pdf' % (samptype, ttvrtype)
         print 'Writing to %s...' % path
         plt.savefig(path)
         plt.close()
