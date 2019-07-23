@@ -1,9 +1,24 @@
+import pickle, os
 import os, numpy as np
 import tdpy
 from tdpy.util import summgene
 import emcee
 import matplotlib.pyplot as plt
 import allesfitter
+
+def conv_pick():
+    pathbase = os.environ['TTVR_DATA_PATH'] + '/'
+    pathdata = pathbase + 'data/'
+    
+    objtfile = open(pathdata + 'measured_allesfit_all.pickle','rb')
+    datapick = pickle.load(objtfile)
+    objtfile = open(pathdata + 'measured_allesfit_all_ttv.pickle','rb')
+    datapickttvr = pickle.load(objtfile)
+    
+    with open(pathdata + 'measured_allesfit_all_conv.pickle', 'wb') as pfile:
+        pickle.dump(datapick, pfile, protocol=2)
+    with open(pathdata + 'measured_allesfit_all_ttv_conv.pickle', 'wb') as pfile:
+        pickle.dump(datapickttvr, pfile, protocol=2)
 
 
 def ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptmcmc=True, liststrgplan=['b']):
