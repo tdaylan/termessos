@@ -345,17 +345,44 @@ def init():
             plt.close()
     
 
-def plot_ttvr(gdat, strgplottype, ttvrtype, listvarb, strgpdfn):
+def plot_unce(gdat, ttvrtype, listvarb):
     
-    print 'plot_ttvr()'
+    figr, axis = plt.subplots(3, 1, figsize=(12, 10))
+    for j in gdat.indxplan:
+        axis[j].set_xlabel('$i_T$')
+        axistwin = axis[j].twiny()
+        axistwin.set_xlabel('$T$ [day]')
+        limtindx = np.array(axis[j].get_xlim())
+        limttime = limtindx * gdat.meanperiline[j]
+        axistwin.set_xlim(limttime)
+        listtemptemp = []
+        numbsamp = len(listvarb[0])
+        sizearry = np.empty(numbsamp, dtype=int)
+        for i in range(len(listvarb[0])):
+            listtemptemp.append(listvarb[1][i][j])
+            sizearry[i] = listvarb[1][i][j].size
+        minmsizearry = np.amin(sizearry)
+        listtemp = np.empty((numbsamp, minmsizearry))
+        for i in range(numbsamp):
+            listtemp[i, :] = listtemptemp[i][:minmsizearry]
+        axis[j].plot(listvarb[0][0][j][:minmsizearry], np.std(listtemp, 0) * gdat.facttime)
+    limt = np.array([astropy.time.Time('2019-09-01T00:00:00', format='isot', scale='utc').jd, \
+                     astropy.time.Time('2020-09-01T00:00:00', format='isot', scale='utc').jd]) - gdat.timeobsdinit
+    plt.tight_layout()
+    path = gdat.pathimag + 'stdvtimetranmodl_%s.pdf' % (ttvrtype)
+    print('Writing to %s...' % path)
+    plt.savefig(path)
+    plt.close()
+
+
+
+def plot_ttvr(gdat, strgplottype, ttvrtype, listvarb, strgpdfn):
     
     listindxtranmodl, listtimetranmodl, listindxtranmodlproj, listtimetranmodlproj = listvarb
 
     numbsamp = len(listindxtranmodl)
     indxsamp = np.arange(numbsamp)
     
-    print 'indxsamp'
-    summgene(indxsamp)
     gdat.timetranline = [[] for j in gdat.indxplan]
 
     if strgplottype == 'resi':
@@ -468,19 +495,14 @@ def retr_lpos(para, gdat, ttvrtype, strgpdfn):
 
 def retr_modl(para, gdat, ttvrtype):
     
-    #print 'retr_modl()'
     paraglob = np.copy(gdat.paraglob)
     
     if ttvrtype == 'peri':
-        #print 'para'
-        #print para
         paraglob[2+1+gdat.indxplan*7] = para
     if ttvrtype == 'perimass':
         paraglob[2+1+gdat.indxplan*7] = para[:gdat.numbplan]
         paraglob[2+gdat.indxplan*7] = para[gdat.numbplan:2*gdat.numbplan]
     
-    #print 'paraglob'
-    #print paraglob
     planet1 = ttvfast.models.Planet(*paraglob[2:2+7])
     planet2 = ttvfast.models.Planet(*paraglob[2+7:2+14])
     planet3 = ttvfast.models.Planet(*paraglob[2+14:])
@@ -612,13 +634,6 @@ def init():
     gdat.timetranobsd = [[] for j in gdat.indxplan]
     gdat.stdvtimetranobsd = [[] for j in gdat.indxplan]
     for j in gdat.indxplan:
-        #if j == 0:
-        #    gdat.timetranobsd[j] = np.array([2458387.0927381925, 2458390.4528234517, 2458393.812908711, 2458397.17299397, 2458400.5330792293, 2458403.8931644885, 2458413.973420266, 2458417.3335055253, 2458427.413761303, 2458430.773846562, 2458434.133931821, 2458440.8541023396, 2458444.214187599, 2458447.574272858, 2458454.2944433764, 2458457.6545286356, 2458461.0146138947, 2458497.9755517454])
-        #if j == 1:
-        #    gdat.timetranobsd[j] = np.array([2458389.5025863373, 2458395.162756024, 2458400.822925711, 2458412.1432650844, 2458417.803434771, 2458423.463604458, 2458429.123774145, 2458434.7839438315, 2458440.4441135186, 2458446.1042832052, 2458451.764452892, 2458457.4246225785, 2458463.0847922657, 2458468.7449619523, 2458497.045810386])
-        #    gdat.timetranobsd[j] = np.concatenate((gdat.timetranobsd[j], np.array([2458576.29165406, 2458598.93411])))
-        #if j == 2:
-        #    gdat.timetranobsd[j] = np.array([2458389.677356091, 2458401.0575013356, 2458412.43764658, 2458435.1979370695, 2458446.5780823138, 2458457.9582275585, 2458480.7185180476, 2458503.478808537, 2458537.619244271])
             
         gdat.timetranobsd[j] = datapickttvr[gdat.liststrgplan[j]]['transit_time']
         gdat.stdvtimetranobsd[j] = datapickttvr[gdat.liststrgplan[j]]['transit_time_err']
@@ -627,22 +642,14 @@ def init():
             gdat.stdvtimetranobsd[j] = np.concatenate((gdat.stdvtimetranobsd[j], np.array([0.0027935178950429, 1. / 60. / 24.])))
         gdat.timetranobsd[j] -= gdat.timeobsdinit
         
-        #gdat.stdvtimetranobsd[j] = np.ones_like(gdat.timetranobsd[j]) * 10. / 60. / 24.
-        
-        #if j == 1:
-        #    gdat.stdvtimetranobsd[j][-2] = 0.0027935178950429
-        #    gdat.stdvtimetranobsd[j][-1] = 1. / 60. / 24.
-    
     for j in gdat.indxplan:
-        print 
         gdat.indxtranobsd[j] = np.round(gdat.timetranobsd[j] / gdat.meanperiline[j]).astype(int)
     
     # convert Earth mass to Solar mass
     gdat.meanmassradv = np.array([2.47, 5.46, 2.55]) * 0.00000300245
     stdvmassradv = np.array([0.75, 1.30, 0.91])
     
-    samptype = 'emce'#sys.argv[1]
-    #os.mkdir(gdat.pathimag + '%s' % (samptype))
+    samptype = 'emce'
     
     # setttings
     ## modeling 
@@ -685,8 +692,6 @@ def init():
         0,#longNode
         0,#Argument
         8.25829165761]#Mean anomaly
-    
-    
     
     planet1 = ttvfast.models.Planet(*gdat.paraglob[2:9])
     planet2 = ttvfast.models.Planet(*gdat.paraglob[9:16])
@@ -758,8 +763,6 @@ def init():
     
         dictllik = [gdat, ttvrtype, 'post']
         
-        print 'meanpara'
-        print meanpara
         if samptype == 'emce':
             numbwalk = 20
             indxwalk = np.arange(numbwalk)
@@ -803,17 +806,20 @@ def init():
         
         gdat.parapost = objtsave.flatchain
         if ttvrtype != 'sigm':
-            indxsampplot = indxsamp[::100]
-            gdat.sampindxtranmodl = [[] for i in indxsampplot]
-            gdat.samptimetranmodl = [[] for i in indxsampplot]
-            gdat.sampindxtranmodlproj = [[] for i in indxsampplot]
-            gdat.samptimetranmodlproj = [[] for i in indxsampplot]
-            for i in range(indxsampplot.size):
+            gdat.indxsampfeww = indxsamp[::100]
+            gdat.numbsampfeww = gdat.indxsampfeww.size
+            gdat.sampindxtranmodl = [[] for i in gdat.indxsampfeww]
+            gdat.samptimetranmodl = [[] for i in gdat.indxsampfeww]
+            gdat.sampindxtranmodlproj = [[] for i in gdat.indxsampfeww]
+            gdat.samptimetranmodlproj = [[] for i in gdat.indxsampfeww]
+            for i in range(gdat.indxsampfeww.size):
                 gdat.sampindxtranmodl[i], gdat.samptimetranmodl[i], gdat.sampindxtranmodlproj[i], gdat.samptimetranmodlproj[i] = \
-                                                                                             retr_modl(gdat.parapost[indxsampplot[i], :], gdat, ttvrtype)
+                                                                                         retr_modl(gdat.parapost[gdat.indxsampfeww[i], :], gdat, ttvrtype)
             listvarb = gdat.sampindxtranmodl, gdat.samptimetranmodl, gdat.sampindxtranmodlproj, gdat.samptimetranmodlproj
             plot_ttvr(gdat, 'resi', ttvrtype, listvarb, 'post')
             
+            plot_unce(gdat, ttvrtype, listvarb)
+        
         if samptype == 'emce':
             #numbsamp = objtsave.flatchain.shape[0]
             indxsampwalk = np.arange(numbsampwalk)
@@ -860,12 +866,21 @@ def init():
             plt.savefig(path)
             plt.close()
         
-
-
-        listsampproc = np.empty((numbsamp, gdat.numbplan))
+        print 'type(numbsamp)'
+        print type(numbsamp)
+        print 'type(gdat.numbplan)'
+        print type(gdat.numbplan)
+        listsampproc = np.empty((gdat.numbsampfeww, gdat.numbplan))
         for j in gdat.indxplan:
-            listsampproc[:, j] = tranmodl[j][100]
+            print 'gdat.indxsampfeww'
+            summgene(gdat.indxsampfeww)
+            print
+            for ii, i in enumerate(gdat.indxsampfeww):
+                print 'ii, i'
+                print ii, i
+                listsampproc[ii, j] = gdat.samptimetranmodl[ii][j][40]
             listsampproc[:, j] -= np.mean(listsampproc[:, j])
+            listsampproc[:, j] *= gdat.facttime
             listlablpara.append('T_{p,%s}' % gdat.liststrgplan[j])
         listsamp = np.concatenate((listsamp, listsampproc))
         
@@ -878,7 +893,7 @@ def init():
         
         if samptype == 'nest':
             for keys in objtsave:
-                if isinstance(objtsave[keys], np.ndarray) and objtsave[keys].size == numbsamp:
+                if isinstance(objtsave[keys], np.ndarray) and objtsave[keys].size == numbsamp[h]:
                     figr, axis = plt.subplots()
                     axis.plot(indxsamp, objtsave[keys])
                     path = gdat.pathimag + '%s/%s_%s.pdf' % (samptype, keys, ttvrtype)
@@ -932,7 +947,9 @@ def init():
             plt.savefig(path)
             plt.close()
     
+
 def cnfg_t270():
+    
     pathdata = '/Users/tdaylan/DropboxMITTTT/knownplanets/toi-270/'
     pathtmpt = '%s/allesfit_tmpt/' % pathdata
     liststrgplan = ['b', 'c', 'd']
