@@ -349,12 +349,10 @@ def plot_unce(gdat, ttvrtype, listvarb):
     
     figr, axis = plt.subplots(3, 1, figsize=(12, 10))
     for j in gdat.indxplan:
+        axis[j].set_ylabel('$\sigma_T$')
         axis[j].set_xlabel('$i_T$')
         axistwin = axis[j].twiny()
         axistwin.set_xlabel('$T$ [day]')
-        limtindx = np.array(axis[j].get_xlim())
-        limttime = limtindx * gdat.meanperiline[j]
-        axistwin.set_xlim(limttime)
         listtemptemp = []
         numbsamp = len(listvarb[0])
         sizearry = np.empty(numbsamp, dtype=int)
@@ -366,8 +364,12 @@ def plot_unce(gdat, ttvrtype, listvarb):
         for i in range(numbsamp):
             listtemp[i, :] = listtemptemp[i][:minmsizearry]
         axis[j].plot(listvarb[0][0][j][:minmsizearry], np.std(listtemp, 0) * gdat.facttime)
-    limt = np.array([astropy.time.Time('2019-09-01T00:00:00', format='isot', scale='utc').jd, \
+        limtindx = np.array(axis[j].get_xlim())
+        limttime = limtindx * gdat.meanperiline[j]
+        axistwin.set_xlim(limttime)
+        limt = np.array([astropy.time.Time('2019-09-01T00:00:00', format='isot', scale='utc').jd, \
                      astropy.time.Time('2020-09-01T00:00:00', format='isot', scale='utc').jd]) - gdat.timeobsdinit
+        axistwin.fill_between(limt, -10, 10, color='purple', alpha=0.2)
     plt.tight_layout()
     path = gdat.pathimag + 'stdvtimetranmodl_%s.pdf' % (ttvrtype)
     print('Writing to %s...' % path)
@@ -716,11 +718,12 @@ def init():
     # 'emce' or 'nest'
     #numbsamp = np.array([20000, 500])
     #numbsampburn = np.array([1000, 100])
-    numbsamp = np.array([20000, 20000])
-    numbsampburn = np.array([2000, 2000])
+    numbsamp = np.array([2000, 20000])
+    numbsampburn = np.array([200, 2000])
         
     #listttvrtype = ['sigm', 'peri', 'massperi']
-    listttvrtype = ['peri', 'massperi']
+    #listttvrtype = ['peri', 'massperi']
+    listttvrtype = ['peri']
     for h, ttvrtype in enumerate(listttvrtype):
         
         numbdata = 0
@@ -730,9 +733,9 @@ def init():
         if ttvrtype == 'sigm':
             listlablpara = ['$\ln \sigma$']
         if ttvrtype == 'peri':
-            listlablpara = ['$P_b$ []', '$P_c$ []', '$P_d$ []']
+            listlablpara = ['$P_b$ [day]', '$P_c$ [day]', '$P_d$ [day]']
         if ttvrtype == 'perimass':
-            listlablpara = ['$P_b$ []', '$P_c$ []', '$P_d$ []', '$M_b$ []', '$M_c$ []', '$M_d$ []']
+            listlablpara = ['$P_b$ [day]', '$P_c$ [day]', '$P_d$ [day]', '$M_b$ []', '$M_c$ []', '$M_d$ []']
         
         numbpara = len(listlablpara)
         indxpara = np.arange(numbpara)
@@ -801,7 +804,56 @@ def init():
             results = sampler.results
             results.summary()
             objtsave = results
-       
+        
+        timetranwind = [[] for j in gdat.indxplan]
+        timetranwind[0] = []
+        timetranwind[1] = np.array([
+                                      2458830.995990, \
+                                      2458836.656162, \
+                                      2458842.316334, \
+                                      2458847.976506, \
+                                      2458887.597710, \
+                                      2458893.257882, \
+                                      2458898.918054, \
+                                      2458904.578226, \
+                                      2458921.558742, \
+                                      2458927.218914, \
+                                      2458938.539258, \
+                                      2458944.199430, \
+                                      2458955.519774, \
+                                      2458961.179946, \
+                                      2458966.840118, \
+                                      2458972.500290, \
+                                      2458978.160462, \
+                                      2458983.820634, \
+                                      2459006.461322, \
+                                      2459012.121494, \
+                                      2459017.781666, \
+                                      2459023.441838, \
+                                      2459057.402870, \
+                                      2459063.063042, \
+                                      2459068.723214, \
+                                      2459074.383386, \
+                                      2459080.043558, \
+                                     ])
+        timetranwind[2] = np.array([
+                                      2458890.403520, \
+                                      2458901.783660, \
+                                      2458924.543940, \
+                                      2458935.924080, \
+                                      2458958.684360, \
+                                      2458970.064500, \
+                                      2458981.444640, \
+                                      2459004.204920, \
+                                      2459015.585060, \
+                                      2459026.965200, \
+                                      2459061.105620, \
+                                      2459072.485760, \
+                                     ])
+        for j in gdat.indxplan:
+            if j == 0:
+                continue
+            timetranwind[j] -= gdat.timeobsdinit
         indxsamp = np.arange(numbsamp[h])
         
         gdat.parapost = objtsave.flatchain
@@ -820,6 +872,36 @@ def init():
             
             plot_unce(gdat, ttvrtype, listvarb)
         
+        numbsampfeww = gdat.indxsampfeww.size
+
+        for j in gdat.indxplan:
+            if j == 0:
+                continue
+            print 'j'
+            print j
+            numbtranwind = timetranwind[j].size
+            timetranwindpred = np.empty((numbtranwind, numbsampfeww))
+            for k, timetran in enumerate(timetranwind[j]):
+                #print 'k'
+                #print k
+                #print 'timetran'
+                #print timetran
+                for i in range(numbsampfeww):
+                    #print 'i'
+                    #print i
+                    #print 'gdat.samptimetranmodl[i][j]'
+                    #print gdat.samptimetranmodl[i][j]
+                    #summgene(gdat.samptimetranmodl[i][j])
+                    indx = np.argmin(np.abs(gdat.samptimetranmodl[i][j] - timetran))
+                    timetranwindpred[k, i] = gdat.samptimetranmodl[i][j][indx]
+                    #print 'indx'
+                    #print indx
+                    #print
+
+                print '%f %f %g %g' % (gdat.timeobsdinit + timetranwind[j][k], gdat.timeobsdinit + np.mean(timetranwindpred[k, :]), \
+                                                                                        np.std(timetranwindpred[k, :]) * gdat.facttime, \
+                                                                                        (np.mean(timetranwindpred[k, :]) - timetran) * gdat.facttime)
+
         if samptype == 'emce':
             #numbsamp = objtsave.flatchain.shape[0]
             indxsampwalk = np.arange(numbsampwalk)
@@ -866,18 +948,9 @@ def init():
             plt.savefig(path)
             plt.close()
         
-        print 'type(numbsamp)'
-        print type(numbsamp)
-        print 'type(gdat.numbplan)'
-        print type(gdat.numbplan)
         listsampproc = np.empty((gdat.numbsampfeww, gdat.numbplan))
         for j in gdat.indxplan:
-            print 'gdat.indxsampfeww'
-            summgene(gdat.indxsampfeww)
-            print
             for ii, i in enumerate(gdat.indxsampfeww):
-                print 'ii, i'
-                print ii, i
                 listsampproc[ii, j] = gdat.samptimetranmodl[ii][j][40]
             listsampproc[:, j] -= np.mean(listsampproc[:, j])
             listsampproc[:, j] *= gdat.facttime
