@@ -28,8 +28,13 @@ import tdpy.mcmc
 from tdpy.util import summgene
 import tdpy
 
-import matplotlib.pyplot as plt
+import matplotlib as mpl
 import matplotlib.gridspec as gridspec
+from matplotlib import pyplot as plt
+mpl.rc('image', interpolation='none', origin='lower')
+mpl.rcParams['figure.figsize'] = (6., 5.)
+mpl.rcParams['text.usetex'] = True
+mpl.rcParams['text.latex.preamble'] = [r'\usepackage{amsmath}'] #for \text command
 import time
 
 import allesfitter
@@ -249,19 +254,19 @@ def exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptm
     objtfile.close()
 
 
-def icdf(para, numbepoc):
+def icdf(para, gdat, ttvrtype):
     
-    icdf = limtpara[0, :] + para * (limtpara[1, :] - limtpara[0, :])
+    icdf = gdat.limtpara[0, :] + para * (gdat.limtpara[1, :] - gdat.limtpara[0, :])
 
     return icdf
 
 
-def retr_lpos(para, gdat, ttvrtype, strgpdfn):
+def retr_lpos(para, gdat, ttvrtype):
     
     if ((para < gdat.limtpara[0, :]) | (para > gdat.limtpara[1, :])).any():
         lpos = -np.inf
     else:
-        llik = retr_llik(para, gdat, ttvrtype, strgpdfn)
+        llik = retr_llik(para, gdat, ttvrtype)
         lpos = llik
     
     return lpos
@@ -291,8 +296,6 @@ def retr_llik_sinu(para, time, numbepoc, ttvrobsv, ttvrstdvobsv, ttvrtype):
 
 
 def init_sinu():
-    pathdata = os.environ['TESS_TTVR_DATA_PATH'] + '/'
-    os.system('mkdir -p %s' % pathdata)
     
     # From Table 2
     epoc = 2458375.169883
@@ -316,24 +319,12 @@ def init_sinu():
     
     time = np.copy(indxepocobsv)
     
-    # 'emce' or 'nest'
-    samptype = sys.argv[1]
-    
-    pathmetd = pathdata + samptype + '/'
-    os.system('mkdir -p %s' % pathmetd)
-    
     listttvrtype = ['cons', 'sinu']
     for ttvrtype in listttvrtype:
         if ttvrtype == 'cons':
             numbpara = 1
         if ttvrtype == 'sinu':
             numbpara = 4
-        
-        if samptype == 'emce':
-            numbsamp = 200000
-            numbsampburn = 20000
-        
-        numbdoff = numbepoc - numbpara
         
         indxpara = np.arange(numbpara)
         limtpara = np.empty((2, numbpara))
@@ -364,82 +355,20 @@ def init_sinu():
         dictllik = [time, numbepoc, ttvrobsv, ttvrstdvobsv, ttvrtype]
         dicticdf = [numbepoc]
         
-        if samptype == 'emce':
-            numbwalk = 50
-            indxwalk = np.arange(numbwalk)
-            parainit = []
-            for k in indxwalk:
-                parainit.append(np.empty(numbpara))
-                meannorm = (limtpara[0, :] + limtpara[1, :]) / 2.
-                stdvnorm = (limtpara[0, :] - limtpara[1, :]) / 10.
-                parainit[k]  = (scipy.stats.truncnorm.rvs((limtpara[0, :] - meannorm) / stdvnorm, \
-                                                (limtpara[1, :] - meannorm) / stdvnorm)) * stdvnorm + meannorm
-            numbsampwalk = numbsamp / numbwalk
-            numbsampwalkburn = numbsampburn / numbwalk
-            objtsamp = emcee.EnsembleSampler(numbwalk, numbpara, retr_lpos_sinu, args=dictllik)
-            parainitburn, prob, state = objtsamp.run_mcmc(parainit, numbsampwalkburn)
-            objtsamp.reset()
-            objtsamp.run_mcmc(parainitburn, numbsampwalk)
-            objtsave = objtsamp
-        else:
-        
-            sampler = dynesty.NestedSampler(retr_llik, icdf, numbpara, logl_args=dictllik, ptform_args=dicticdf, bound='single', dlogz=1000.)
-            sampler.run_nested()
-            results = sampler.results
-            results.summary()
-            objtsave = results
-            
-        if samptype == 'emce':
-            numbsamp = objtsave.flatchain.shape[0]
-            indxsampwalk = np.arange(numbsampwalk)
-        else:
-            numbsamp = objtsave['samples'].shape[0]
-        
-        indxsamp = np.arange(numbsamp)
-        
         # resample the nested posterior
         if samptype == 'nest':
             weights = np.exp(results['logwt'] - results['logz'][-1])
             samppara = dyutils.resample_equal(results.samples, weights)
             assert samppara.size == results.samples.size
         
-        if samptype == 'emce':
-            listsamp = objtsave.flatchain
-            listllik = objtsave.flatlnprobability
-        else:
-            listsamp = samppara[:, k]
-       
-        indxsampmlik = np.argmax(listllik)
-    
         # plot the posterior
         ## parameter
         ### trace
-        for k in indxpara:
-            if samptype == 'emce':
-                figr, axis = plt.subplots()
-                for i in indxwalk:
-                    axis.plot(indxsampwalk[::10], objtsave.chain[i, ::10, k])
-                path = pathdata + '%s/tracwalk%04d_%s.pdf' % (samptype, k, ttvrtype)
-                print('Writing to %s...' % path)
-                plt.savefig(path)
-                plt.close()
+        plot_trac(gdat, objtsave)
             
-        ### histogram
-        for k in indxpara:
-            figr, axis = plt.subplots(figsize=(6, 4))
-            axis.hist(listsamp[:, k], numbbins) 
-            axis.set_ylabel('$N_{samp}$')
-            axis.set_xlabel(listlablpara[k])
-            path = pathdata + '%s/hist%04d_%s.pdf' % (samptype, k, ttvrtype)
-            plt.tight_layout()
-            print('Writing to %s...' % path)
-            plt.savefig(path)
-            plt.close()
-        
         path = pathdata + '%s/' % samptype
         strgplot = 'post_%s' % ttvrtype
     
-        listparamlik = listsamp[indxsampmlik, :]
         tdpy.mcmc.plot_grid(path, strgplot, listsamp, listlablpara, listvarbdraw=[listparamlik], numbbinsplot=numbbins)
         
         if samptype == 'nest':
@@ -450,20 +379,6 @@ def init_sinu():
                     path = pathdata + '%s/%s_%s.pdf' % (samptype, keys, ttvrtype)
                     print('Writing to %s...' % path)
                     plt.savefig(path)
-        else:
-            ## log-likelihood
-            figr, axis = plt.subplots()
-            if samptype == 'emce':
-                for i in indxwalk:
-                    axis.plot(indxsampwalk[::10], objtsave.lnprobability[::10, i])
-            else:
-                axis.plot(indxsamp, objtsave['logl'])
-            path = pathdata + '%s/llik_%s.pdf' % (samptype, ttvrtype)
-            print('Writing to %s...' % path)
-            plt.savefig(path)
-            plt.close()
-        
-            chi2 = -2. * objtsave.lnprobability
             
         ### sample model ttvr
         numbttvrmodl = 100
@@ -523,75 +438,20 @@ def init_sinu():
         plt.savefig(path)
         plt.close()
         
-        ### nested sampling specific
-        if samptype == 'nest':
-            rfig, raxes = dyplot.runplot(results)
-            path = pathdata + '%s/dyne_runs_%s.pdf' % (samptype, ttvrtype)
-            print('Writing to %s...' % path)
-            plt.savefig(path)
-            plt.close()
-            
-            tfig, taxes = dyplot.traceplot(results)
-            path = pathdata + '%s/dyne_trac_%s.pdf' % (samptype, ttvrtype)
-            print('Writing to %s...' % path)
-            plt.savefig(path)
-            plt.close()
-            
-            cfig, caxes = dyplot.cornerplot(results)
-            path = pathdata + '%s/dyne_corn_%s.pdf' % (samptype, ttvrtype)
-            print('Writing to %s...' % path)
-            plt.savefig(path)
-            plt.close()
-    
 
-def plot_stdv(gdat, ttvrtype, listvarb):
-    
-    figr, axis = plt.subplots(3, 1, figsize=(12, 10))
-    for j in gdat.indxplan:
-        axis[j].set_ylabel('$\sigma_T$')
-        axis[j].set_xlabel('$i_T$')
-        axistwin = axis[j].twiny()
-        axistwin.set_xlabel('$T$ [day]')
-        listtemptemp = []
-        numbsamp = len(listvarb[0])
-        sizearry = np.empty(numbsamp, dtype=int)
-        for i in range(len(listvarb[0])):
-            listtemptemp.append(listvarb[1][i][j])
-            sizearry[i] = listvarb[1][i][j].size
-        minmsizearry = np.amin(sizearry)
-        listtemp = np.empty((numbsamp, minmsizearry))
-        for i in range(numbsamp):
-            listtemp[i, :] = listtemptemp[i][:minmsizearry]
-        axis[j].plot(listvarb[0][0][j][:minmsizearry], np.std(listtemp, 0) * gdat.facttime)
-        limtindx = np.array(axis[j].get_xlim())
-        limttime = limtindx * gdat.meanperiline[j]
-        axistwin.set_xlim(limttime)
-        limt = np.array([astropy.time.Time('2019-09-01T00:00:00', format='isot', scale='utc').jd, \
-                     astropy.time.Time('2020-09-01T00:00:00', format='isot', scale='utc').jd]) - gdat.timeobsdinit
-        axistwin.fill_between(limt, -10, 10, color='purple', alpha=0.2)
-    plt.tight_layout()
-    path = gdat.pathimag + 'stdvtimetranmodl_%s.pdf' % (ttvrtype)
-    print('Writing to %s...' % path)
-    plt.savefig(path)
-    plt.close()
-
-
-
-def plot_ttvr(gdat, strgplottype, ttvrtype, listvarb, strgpdfn):
+def plot_ttvr(gdat, ttvrtype, listvarb):
     
     listindxtranmodl, listtimetranmodl, listindxtranmodlproj, listtimetranmodlproj = listvarb
 
     numbsamp = len(listindxtranmodl)
+    print('numbsamp')
+    print(numbsamp)
     indxsamp = np.arange(numbsamp)
     
     gdat.timetranline = [[] for j in gdat.indxplan]
 
-    if strgplottype == 'resi':
-        strgplot = 'resi'
-        figrsize = (12, 8)
-    else:
-        strgplot = 'raww'
-        figrsize = (6, 14)
+    strgplot = 'resi'
+    figrsize = (12, 8)
     
     figr = plt.figure(figsize=figrsize)
     gs = gridspec.GridSpec(gdat.numbplan, 2, width_ratios=[1, 2])
@@ -599,57 +459,45 @@ def plot_ttvr(gdat, strgplottype, ttvrtype, listvarb, strgpdfn):
     for a in range(2):
         for j in gdat.indxplan:
             axis[j][a] = plt.subplot(gs[j, a])
-    if strgplottype == 'resi':
-        axis[1][0].set_ylabel('$T_O - T_M$ [min]')
-        axis[1][1].set_ylabel('$T_O - T_M$ [min]')
-    else:
-        axis[1][0].set_ylabel('$T$ [day]')
-        axis[1][1].set_ylabel('$T$ [day]')
+    axis[1][0].set_ylabel('$\Delta T$ [minute]')
+    axis[1][1].set_ylabel('$\Delta T$ [minute]')
     
     for a in range(2):
         for j in gdat.indxplan:
             axis[j][a].set_xlabel('$i_T$')
     
-            if strgplottype == 'resi':
+            ydat = (gdat.timetranobsd[j] - gdat.timetranlineproj[j]) * gdat.facttime
+            temp, listcaps, temp = axis[j][a].errorbar(gdat.indxtranobsd[j], ydat, color='k', \
+                                            yerr=gdat.stdvtimetranobsd[j]*gdat.facttime, label='Observed - Linear', ls='', markersize=2, marker='o')
+            
+            if (ydat > 1000).any():
+                raise Exception('')
 
-                ydat = (gdat.timetranobsd[j] - gdat.timetranlineproj[j]) * gdat.facttime
-                temp, listcaps, temp = axis[j][a].errorbar(gdat.indxtranobsd[j], ydat, color='k', \
-                                                yerr=gdat.stdvtimetranobsd[j]*gdat.facttime, label='Observed - Linear', ls='', markersize=2, marker='o')
-                
-                if (ydat > 1000).any():
-                    raise Exception('')
-
-                for caps in listcaps:
-                    caps.set_markeredgewidth(3)
+            for caps in listcaps:
+                caps.set_markeredgewidth(3)
         
-                if numbsamp == 1:
-                    alph = 1.
-                else:
-                    alph = 0.1
-
-                for i in indxsamp:
-                    if i == 0:
-                        lablfrst = 'N-body - Mean N-body'
-                        lablseco = 'N-body - Linear'
-                        #rasterized = False
-                    else:
-                        lablfrst = None
-                        lablseco = None
-                        #rasterized = True
-                    if len(listindxtranmodl[i][j]) > 0:
-                        gdat.timetranline[j] = gdat.meanepocline[j] + (listindxtranmodl[i][j] - gdat.numbtranoffs[j]) * \
-                                                                                            gdat.meanperiline[j] - gdat.timeobsdinit
-                        axis[j][a].plot(listindxtranmodl[i][j], (listtimetranmodl[i][j] - listtimetranmodl[i][j][0] - \
-                                listindxtranmodl[i][j] * (listtimetranmodl[i][j][-1] - listtimetranmodl[i][j][0]) / \
-                                (listindxtranmodl[i][j].size - 1)) * gdat.facttime, \
-                                          label=lablfrst, color='b', alpha=alph)
-                        axis[j][a].plot(listindxtranmodl[i][j], (listtimetranmodl[i][j] - gdat.timetranline[j]) * gdat.facttime, \
-                                                                                                label=lablseco, color='r', alpha=alph)
-                axis[j][a].text(0.9, 0.13, gdat.liststrgplan[j], transform=axis[j][a].transAxes)
+            if numbsamp == 1:
+                alph = 1.
             else:
-                axis[j][a].plot(listindxtranmodl[i][j], timetranmodl[i][j], label='Model')
-                axis[j][a].plot(gdat.indxtranobsd[j], gdat.timetranobsd[j], label='Observed')
-                axis[j][a].text(0.86, 0.13, gdat.liststrgplan[j], transform=axis[j][a].transAxes)
+                alph = 0.1
+
+            for i in indxsamp:
+                if i == 0:
+                    lablseco = 'N-body - Linear'
+                    #rasterized = False
+                else:
+                    lablseco = None
+                    #rasterized = True
+                if len(listindxtranmodl[i][j]) > 0:
+                    gdat.timetranline[j] = gdat.meanepocline[j] + (listindxtranmodl[i][j] - gdat.numbtranoffs[j]) * \
+                                                                                        gdat.meanperiline[j] - gdat.timeobsdinit
+                    #axis[j][a].plot(listindxtranmodl[i][j], (listtimetranmodl[i][j] - listtimetranmodl[i][j][0] - \
+                    #        listindxtranmodl[i][j] * (listtimetranmodl[i][j][-1] - listtimetranmodl[i][j][0]) / \
+                    #        (listindxtranmodl[i][j].size - 1)) * gdat.facttime, \
+                    #                  label=lablfrst, color='b', alpha=alph)
+                    axis[j][a].plot(listindxtranmodl[i][j], (listtimetranmodl[i][j] - gdat.timetranline[j]) * gdat.facttime, \
+                                                                                            label=lablseco, color='r', alpha=alph)
+            axis[j][a].text(0.9, 0.13, gdat.liststrgplan[j], transform=axis[j][a].transAxes)
             
             if a == 0:
                 axis[j][a].set_ylim([-30, 30])
@@ -660,27 +508,26 @@ def plot_ttvr(gdat, strgplottype, ttvrtype, listvarb, strgpdfn):
                 if j == 2:
                     axis[j][a].set_xlim([0., 15])
             axistwin = axis[j][a].twiny()
-            axistwin.set_xlabel('$T$ [day]')
+            axistwin.set_xlabel('Time')
             limtindx = np.array(axis[j][a].get_xlim())
-            limttime = limtindx * gdat.meanperiline[j]
+            limttime = limtindx * gdat.meanperiline[j] + gdat.timeobsdinit
             axistwin.set_xlim(limttime)
-            limt = np.array([astropy.time.Time('2019-09-01T00:00:00', format='isot', scale='utc').jd, \
-                             astropy.time.Time('2020-09-01T00:00:00', format='isot', scale='utc').jd]) - gdat.timeobsdinit
-            axistwin.fill_between(limt, -10, 10, color='purple', alpha=0.2)
+            timetick = axistwin.get_xticks()
+            lablxaxi = astropy.time.Time(timetick, format='jd', scale='utc').isot
+            lablxaxi = [xaxi[:7] for xaxi in lablxaxi]
+            axistwin.set_xticklabels(lablxaxi)
+
+            axistwin = axis[j][a].twinx()
+            axistwin.set_ylabel('$5\sigma_T$')
+            axistwin.plot(gdat.indxtranstdv[j], gdat.stdvtime[j] * 5.)
+
     axis[0][1].legend()
     
     plt.tight_layout()
-    path = gdat.pathimag + 'timetran_%s_%s_%s.pdf' % (strgplot, ttvrtype, strgpdfn)
+    path = gdat.pathimag + 'timetran_%s_%s.pdf' % (strgplot, ttvrtype)
     print('Writing to %s...' % path)
     plt.savefig(path)
     plt.close()
-
-
-def icdf(para, numbepoc):
-    
-    icdf = gdat.limtpara[0, :] + para * (gdat.limtpara[1, :] - gdat.limtpara[0, :])
-
-    return icdf
 
 
 def retr_modl(para, gdat, ttvrtype):
@@ -760,34 +607,48 @@ def retr_modl(para, gdat, ttvrtype):
     return indxtranmodl, timetranmodl, indxtranmodlproj, timetranmodlproj
             
 
-def retr_llik(para, gdat, ttvrtype, strgpdfn):
+def retr_llik(para, gdat, ttvrtype):
     
-    if strgpdfn == 'init' or ttvrtype != 'sigm':
-        indxtranmodl, timetranmodl, indxtranmodlproj, timetranmodlproj = retr_modl(para, gdat, ttvrtype)
-    else:
-        timetranmodlproj = gdat.inittimetranmodlproj
+    indxtranmodl, timetranmodl, indxtranmodlproj, timetranmodlproj = retr_modl(para, gdat, ttvrtype)
     
     for j in gdat.indxplan:
-        if strgpdfn == 'init' or ttvrtype != 'sigm':
-            indx = indxtranmodl[j]
-            if indx.size == 0:
-                return -np.inf
-    
         if timetranmodlproj[j].size < gdat.timetranobsd[j].size:
             return -np.inf
     
-    if strgpdfn == 'post':
-        gdat.indxswep += 1
-
     llik = 0.
     for j in gdat.indxplan:
         lliktemp = -0.5 * np.sum((gdat.timetranobsd[j] - timetranmodlproj[j])**2 / (gdat.stdvtimetranobsd[j])**2)
         llik += lliktemp
+        #print('j')
+        #print(j)
+        #print('gdat.timetranobsd[j]')
+        #summgene(gdat.timetranobsd[j])
+        #print(gdat.timetranobsd[j])
+        #print('timetranmodlproj[j]')
+        #summgene(timetranmodlproj[j])
+        #print(timetranmodlproj[j])
+        #print('gdat.stdvtimetranobsd[j]')
+        #summgene(gdat.stdvtimetranobsd[j])
+        #print(gdat.stdvtimetranobsd[j])
+        #print('(gdat.timetranobsd[j] - timetranmodlproj[j])**2')
+        #print((gdat.timetranobsd[j] - timetranmodlproj[j])**2)
+        #print('(gdat.stdvtimetranobsd[j])**2')
+        #print((gdat.stdvtimetranobsd[j])**2)
+        #print('(gdat.timetranobsd[j] - timetranmodlproj[j])**2 / (gdat.stdvtimetranobsd[j])**2')
+        #print((gdat.timetranobsd[j] - timetranmodlproj[j])**2 / (gdat.stdvtimetranobsd[j])**2)
+        #print('lliktemp')
+        #print(lliktemp)
+        #print('')
+    #print('llik')
+    #print(llik)
+    #print('')
+    #print('')
     
     return llik
 
 
 def init():
+    
     # global object
     gdat = tdpy.util.gdatstrt()
     
@@ -814,12 +675,12 @@ def init():
     path = gdat.pathdata + 'measured_allesfit_all_ttv.pickle'
     objtfile = open(path,'rb')
     datapickttvr = pickle.load(objtfile)
-    
     gdat.indxtranobsd = [[] for j in gdat.indxplan]
     gdat.timetranlineproj = [[] for j in gdat.indxplan]
     gdat.timetranobsd = [[] for j in gdat.indxplan]
     gdat.stdvtimetranobsd = [[] for j in gdat.indxplan]
     for j in gdat.indxplan:
+        #gdat.meanperiline[j] = datapickttvr[gdat.liststrgplan[j]]['lin_period']
         gdat.timetranobsd[j] = datapickttvr[gdat.liststrgplan[j]]['transit_time']
         gdat.stdvtimetranobsd[j] = datapickttvr[gdat.liststrgplan[j]]['transit_time_err']
         gdat.timetranobsd[j] -= gdat.timeobsdinit
@@ -833,7 +694,7 @@ def init():
     
     # convert Earth mass to Solar mass
     
-    samptype = 'emce'
+    samptype = 'emce'#'''nest'
     
     # setttings
     ## modeling 
@@ -858,85 +719,70 @@ def init():
         gdat.timetranlineproj[j] = gdat.meanepocline[j] + (gdat.indxtranobsd[j] - gdat.numbtranoffs[j]) * gdat.meanperiline[j] - gdat.timeobsdinit
     
     # 'emce' or 'nest'
-    numbsamp = 10000
-    numbsampburn = 2000
+    numbsampwalk = 10000
+    numbsampburnwalk = 1000
         
     numbdata = 0
     for j in gdat.indxplan:
         numbdata += gdat.indxtranobsd[j].size
     
     listlablpara = []
-    for strgfrst, strgseco in [['P', ' [day]'], ['M', ' [M_\odot]'], ['e', ''], ['i', ' [deg]'], ['l', ' [deg]'], \
-                                                                                        ['w', ' [deg]'], ['TA', ' [deg]']]:
+    for strgfrst, strgseco in [['M', ' [$M_{\odot}$]'], ['P', ' [day]'], ['\epsilon', ''], ['i', ' [deg]'], ['\Omega', ' [deg]'], \
+                                                                                        ['\omega', ' [deg]'], ['A', ' [deg]']]:
         for j in gdat.indxplan:
             listlablpara.append('$%s_%s$%s' % (strgfrst, gdat.liststrgplan[j], strgseco))
-    print('listlablpara')
-    print(listlablpara)
     numbpara = len(listlablpara)
     indxpara = np.arange(numbpara)
     gdat.limtpara = np.empty((2, numbpara))
     numbdoff = numbdata - numbpara
-    
-        #0,#e
-        #88.65,#i
-        #0,#longNode
-        #0, #argument
-        #89.99999, #Mean Anomolay
-        #0, #e
-        #89.53,#i
-        #0,#longNode
-        #0,#Argument
-        #296.7324,#Mean Anomaly
-        #0,#e
-        #89.69,#i
-        #0,#longNode
-        #0,#Argument
-        #8.25829165761]#Mean anomaly
     
     gdat.numbparaplan = 7
     gdat.indxparaplan = np.arange(gdat.numbparaplan)
     gdat.meanparaplan = np.empty((gdat.numbplan, gdat.numbparaplan))
     gdat.stdvparaplan = np.empty((gdat.numbplan, gdat.numbparaplan))
     gdat.meanparaplan[:, 0] = np.array([2.47, 5.46, 2.55]) * 0.00000300245
-    gdat.stdvparaplan[:, 0] = np.array([0.75, 1.30, 0.91]) * 0.00000300245
+    gdat.stdvparaplan[:, 0] = np.array([0.75, 1.30, 0.91]) * 0.00000300245 * 1e-2
     
     gdat.meanparaplan[:, 1] = gdat.meanperiline
-    gdat.stdvparaplan[:, 1] = gdat.meanparaplan[:, 1] * 1e-3
+    gdat.stdvparaplan[:, 1] = gdat.meanparaplan[:, 1] * 1e-2
         
-    gdat.meanparaplan[:, 2] = np.array([0., 0., 0.])
-    gdat.stdvparaplan[:, 2] = gdat.meanparaplan[:, 2] + 1e-3
+    gdat.meanparaplan[:, 2] = np.array([0., 0., 0.]) # ecce
+    gdat.stdvparaplan[:, 2] = gdat.meanparaplan[:, 2] + 1e-2
     
-    gdat.meanparaplan[:, 3] = np.array([88.65, 89.53, 89.69])
-    gdat.stdvparaplan[:, 3] = gdat.meanparaplan[:, 3] * 1e-3
+    gdat.meanparaplan[:, 3] = np.array([88.65, 89.53, 89.69]) # incl
+    gdat.stdvparaplan[:, 3] = gdat.meanparaplan[:, 3] * 1e-2
     
-    gdat.meanparaplan[:, 4] = np.array([0., 0., 0.])
-    gdat.stdvparaplan[:, 4] = gdat.meanparaplan[:, 4] + 1e-3
+    gdat.meanparaplan[:, 4] = np.array([0., 0., 0.]) # ascending long
+    gdat.stdvparaplan[:, 4] = gdat.meanparaplan[:, 4] + 1e-2
     
-    gdat.meanparaplan[:, 5] = np.array([0., 0., 0.])
-    gdat.stdvparaplan[:, 5] = gdat.meanparaplan[:, 5] + 1e-3
+    gdat.meanparaplan[:, 5] = np.array([0., 0., 0.]) # arg periapsis
+    gdat.stdvparaplan[:, 5] = gdat.meanparaplan[:, 5] + 1e-2
     
-    gdat.meanparaplan[:, 6] = np.array([89.99999, 296.7324, 8.25829165761])
-    gdat.stdvparaplan[:, 6] = gdat.meanparaplan[:, 6] * 1e-3
+    gdat.meanparaplan[:, 6] = np.array([89.99999, 296.7324, 8.25829165761]) # mean anomaly
+    gdat.stdvparaplan[:, 6] = gdat.meanparaplan[:, 6] * 1e-2
     
+    gdat.pathmlik = gdat.pathdata + 'mlikpara.csv'
+    gdat.boolinitmlik = True
+    if os.path.exists(gdat.pathmlik) and gdat.boolinitmlik:
+        print('Initializing from previous maximum likelihod estimate...')
+        data = np.loadtxt(gdat.pathmlik, delimiter=',')
+        for n in gdat.indxparaplan:
+            for j in gdat.indxplan:
+                gdat.meanparaplan[j, n] = data[j+n*gdat.numbplan]
+
     for n in gdat.indxparaplan:
         for j in gdat.indxplan:
             gdat.limtpara[0, j+n*gdat.numbplan] = gdat.meanparaplan[j, n] - gdat.stdvparaplan[j, n]
             gdat.limtpara[1, j+n*gdat.numbplan] = gdat.meanparaplan[j, n] + gdat.stdvparaplan[j, n]
-   
-    print('gdat.meanparaplan')
-    print(gdat.meanparaplan)
-    print('gdat.stdvparaplan')
-    print(gdat.stdvparaplan)
-    print('gdat.limtpara')
-    print(gdat.limtpara)
-    numbbins = 60
+
+    numbbins = 20
     indxbins = np.arange(numbbins)
     binspara = np.empty((numbbins + 1, numbpara)) 
     for k in indxpara:
         binspara[:, k] = np.linspace(gdat.limtpara[0, k], gdat.limtpara[1, k], numbbins + 1)
     meanpara = (binspara[1:, :] + binspara[:-1, :]) / 2.
     
-    dictllik = [gdat, ttvrtype, 'post']
+    dictllik = [gdat, ttvrtype]
     
     if samptype == 'emce':
         numbwalk = 2 * numbpara
@@ -945,42 +791,29 @@ def init():
         gdat.meanparainit = (gdat.limtpara[0, :] + gdat.limtpara[1, :]) / 2.
         for k in indxwalk:
             gdat.parainit.append(np.empty(numbpara))
-            stdvnorm = (gdat.limtpara[0, :] - gdat.limtpara[1, :]) / 10.
-            print('k')
-            print(k)
-            print('stdvnorm')
-            print(stdvnorm)
-            print('gdat.limtpara')
-            print(gdat.limtpara)
-            print('gdat.meanparainit')
-            print(gdat.meanparainit)
-            print
-
+            stdvnorm = (gdat.limtpara[1, :] - gdat.limtpara[0, :]) / 10.
+            if os.path.exists(gdat.pathmlik) and gdat.boolinitmlik:
+                stdvnorm *= 1e-3
             gdat.parainit[k]  = (scipy.stats.truncnorm.rvs((gdat.limtpara[0, :] - gdat.meanparainit) / stdvnorm, \
                                                                 (gdat.limtpara[1, :] - gdat.meanparainit) / stdvnorm)) * stdvnorm + gdat.meanparainit
-        numbsampwalk = numbsamp / numbwalk
-        numbsampwalkburn = numbsampburn / numbwalk
+
+        numbsamp = numbsampwalk * numbwalk
+        numbsampburn = numbsampburnwalk * numbwalk
         if gdat.diagmode:
             if numbsampwalk == 0:
                 raise Exception('')
-        print('gdat.meanparainit')
-        print(gdat.meanparainit)
         gdat.initindxtranmodl, gdat.inittimetranmodl, \
                 gdat.initindxtranmodlproj, gdat.inittimetranmodlproj = retr_modl(gdat.meanparainit, gdat, ttvrtype)
         listvarb = [[gdat.initindxtranmodl], [gdat.inittimetranmodl], [gdat.initindxtranmodlproj], [gdat.inittimetranmodlproj]]
-        plot_ttvr(gdat, 'resi', ttvrtype, listvarb, 'init')
         #raise Exception('')
+        # temp
         objtsamp = emcee.EnsembleSampler(numbwalk, numbpara, retr_lpos, args=dictllik, pool=multiprocessing.Pool())
         #objtsamp = emcee.EnsembleSampler(numbwalk, numbpara, retr_lpos, args=dictllik)
-        if numbsampwalkburn > 0:
-            gdat.indxswep = 0
-            print('gdat.parainit')
-            print(gdat.parainit)
-            gdat.parainitburn, prob, state = objtsamp.run_mcmc(gdat.parainit, numbsampwalkburn, progress=True)
+        if numbsampburnwalk > 0:
+            gdat.parainitburn, prob, state = objtsamp.run_mcmc(gdat.parainit, numbsampburnwalk, progress=True)
             objtsamp.reset()
         else:
             gdat.parainitburn = gdat.parainit
-        gdat.indxswep = 0
         objtsamp.run_mcmc(gdat.parainitburn, numbsampwalk, progress=True)
         objtsave = objtsamp
     else:
@@ -992,7 +825,7 @@ def init():
         objtsave = results
     
     timetranwind = [[] for j in gdat.indxplan]
-    timetranwind[0] = []
+    timetranwind[0] = [np.array([])]
     timetranwind[1] = np.array([
                                   2458830.995990, \
                                   2458836.656162, \
@@ -1043,24 +876,37 @@ def init():
     indxsamp = np.arange(numbsamp)
     
     gdat.parapost = objtsave.flatchain
-    if ttvrtype != 'sigm':
-        gdat.indxsampfeww = indxsamp[::100]
-        gdat.numbsampfeww = gdat.indxsampfeww.size
-        gdat.sampindxtranmodl = [[] for i in gdat.indxsampfeww]
-        gdat.samptimetranmodl = [[] for i in gdat.indxsampfeww]
-        gdat.sampindxtranmodlproj = [[] for i in gdat.indxsampfeww]
-        gdat.samptimetranmodlproj = [[] for i in gdat.indxsampfeww]
-        for i in range(gdat.indxsampfeww.size):
-            gdat.sampindxtranmodl[i], gdat.samptimetranmodl[i], gdat.sampindxtranmodlproj[i], gdat.samptimetranmodlproj[i] = \
-                                                                                     retr_modl(gdat.parapost[gdat.indxsampfeww[i], :], gdat, ttvrtype)
-        listvarb = gdat.sampindxtranmodl, gdat.samptimetranmodl, gdat.sampindxtranmodlproj, gdat.samptimetranmodlproj
-        plot_ttvr(gdat, 'resi', ttvrtype, listvarb, 'post')
-        
-        plot_stdv(gdat, ttvrtype, listvarb)
+    gdat.indxsampfeww = indxsamp[::100]
+    gdat.numbsampfeww = gdat.indxsampfeww.size
+    gdat.sampindxtranmodl = [[] for i in gdat.indxsampfeww]
+    gdat.samptimetranmodl = [[] for i in gdat.indxsampfeww]
+    gdat.sampindxtranmodlproj = [[] for i in gdat.indxsampfeww]
+    gdat.samptimetranmodlproj = [[] for i in gdat.indxsampfeww]
+    sizearry = np.empty((gdat.numbsampfeww, gdat.numbplan), dtype=int)
+    listtemptemp = [[[] for i in gdat.indxsampfeww] for j in gdat.indxplan]
+    for ii, i in enumerate(gdat.indxsampfeww):
+        gdat.sampindxtranmodl[ii], gdat.samptimetranmodl[ii], gdat.sampindxtranmodlproj[ii], gdat.samptimetranmodlproj[ii] = \
+                                                                                                    retr_modl(gdat.parapost[i, :], gdat, ttvrtype)
+        for j in gdat.indxplan:
+            listtemptemp[j][ii] = gdat.samptimetranmodl[ii][j]
+            sizearry[ii, j] = gdat.samptimetranmodl[ii][j].size
+    minmsizearry = np.amin(sizearry, 0)
+    gdat.stdvtime = [[] for j in gdat.indxplan]
+    gdat.indxtranstdv = [[] for j in gdat.indxplan]
+    for j in gdat.indxplan:
+        listtemp = np.empty((gdat.numbsampfeww, minmsizearry[j]))
+        for ii, i in enumerate(gdat.indxsampfeww):
+            listtemp[ii, :] = listtemptemp[j][ii][:minmsizearry[j]]
+        gdat.stdvtime[j] = np.std(listtemp, 0) * gdat.facttime
+        gdat.indxtranstdv[j] = np.arange(minmsizearry[j])#gdat.sampindxtranmodl[i][j][minmsizearry[j]]
+
+    listvarb = [gdat.sampindxtranmodl, gdat.samptimetranmodl, gdat.sampindxtranmodlproj, gdat.samptimetranmodlproj]
+    plot_ttvr(gdat, ttvrtype, listvarb)
     
     numbsampfeww = gdat.indxsampfeww.size
 
     for j in gdat.indxplan:
+        # temp
         if j == 0:
             continue
         numbtranwind = timetranwind[j].size
@@ -1077,10 +923,13 @@ def init():
     if samptype == 'emce':
         #numbsamp = objtsave.flatchain.shape[0]
         indxsampwalk = np.arange(numbsampwalk)
-    else:
+    if samptype == 'nest':
         pass
         #numbsamp = objtsave['samples'].shape[0]
     
+    if numbsamp != numbsampwalk * numbwalk:
+        raise Exception('')
+
     # resample the nested posterior
     if samptype == 'nest':
         weights = np.exp(results['logwt'] - results['logz'][-1])
@@ -1092,33 +941,36 @@ def init():
         listllik = objtsave.flatlnprobability
     else:
         listsamp = samppara[:, k]
-    
-    indxsampmlik = np.argmax(listllik)
+    listlpos = objtsave.lnprobability
+    chi2 = -2. * listlpos
     
     # plot the posterior
     ## parameter
     ### trace
-    for k in indxpara:
-        if samptype == 'emce':
-            figr, axis = plt.subplots()
+    if samptype == 'emce':
+        figr, axis = plt.subplots(numbpara + 1, 1, figsize=(12, (numbpara + 1) * 4))
+        for i in indxwalk:
+            axis[0].plot(indxsampwalk, objtsave.lnprobability[:, i])
+        axis[0].set_ylabel('logL')
+        for k in indxpara:
             for i in indxwalk:
-                axis.plot(indxsampwalk[::10], objtsave.chain[i, ::10, k])
-            path = gdat.pathimag + '%s/tracwalk%04d_%s.pdf' % (samptype, k, ttvrtype)
-            print('Writing to %s...' % path)
-            plt.savefig(path)
-            plt.close()
-        
-    ### histogram
-    for k in indxpara:
-        figr, axis = plt.subplots(figsize=(6, 4))
-        axis.hist(listsamp[:, k], numbbins) 
-        axis.set_ylabel('$N_{samp}$')
-        axis.set_xlabel(listlablpara[k])
-        path = gdat.pathimag + '%s/hist%04d_%s.pdf' % (samptype, k, ttvrtype)
-        plt.tight_layout()
+                axis[k+1].plot(indxsampwalk, objtsave.chain[i, :, k])
+            axis[k+1].set_ylabel(listlablpara[k])
+        path = gdat.pathimag + '%s/trac_%s.png' % (samptype, ttvrtype)
         print('Writing to %s...' % path)
         plt.savefig(path)
         plt.close()
+        
+    indxsampmlik = np.argmax(listllik)
+    listparamlik = listsamp[indxsampmlik, :]
+    print('Saving the maximum likelihood to %s...' % gdat.pathmlik)
+    np.savetxt(gdat.pathmlik, listparamlik, delimiter=',')
+    
+    path = gdat.pathimag + '%s/' % samptype
+    strgplot = 'post_%s' % ttvrtype
+    print('path')
+    print(path)
+    tdpy.mcmc.plot_grid(path, strgplot, listsamp, listlablpara, listvarbdraw=[gdat.meanparaplan.flatten()], numbbinsplot=numbbins)
     
     listsampproc = np.empty((gdat.numbsampfeww, gdat.numbplan))
     for j in gdat.indxplan:
@@ -1127,14 +979,13 @@ def init():
         listsampproc[:, j] -= np.mean(listsampproc[:, j])
         listsampproc[:, j] *= gdat.facttime
         listlablpara.append('T_{p,%s}' % gdat.liststrgplan[j])
-    listsamp = np.concatenate((listsamp, listsampproc))
     
-    path = gdat.pathimag + '%s/' % samptype
-    strgplot = 'post_%s' % ttvrtype
-    
-    listparamlik = listsamp[indxsampmlik, :]
-    
-    tdpy.mcmc.plot_grid(path, strgplot, listsamp, listlablpara, listvarbdraw=[listparamlik], numbbinsplot=numbbins)
+    print('Minimum chi2: ')
+    print(np.amin(chi2))
+    print('Minimum chi2 per dof: ')
+    print(np.amin(chi2) / numbdoff)
+    print('Maximum aposterior: ')
+    print(np.amax(listlpos))
     
     if samptype == 'nest':
         for keys in objtsave:
@@ -1144,36 +995,8 @@ def init():
                 path = gdat.pathimag + '%s/%s_%s.pdf' % (samptype, keys, ttvrtype)
                 print('Writing to %s...' % path)
                 plt.savefig(path)
-    else:
-        ## log-likelihood
-        figr, axis = plt.subplots()
-        if samptype == 'emce':
-            for i in indxwalk:
-                axis.plot(indxsampwalk, objtsave.lnprobability[:, i])
-        else:
-            axis.plot(indxsamp, objtsave['logl'])
-        path = gdat.pathimag + '%s/llik_%s.pdf' % (samptype, ttvrtype)
-        print('Writing to %s...' % path)
-        plt.savefig(path)
-        plt.close()
     
-        chi2 = -2. * objtsave.lnprobability
-        
-        print('Posterior-mean chi2: ')
-        print(np.mean(chi2))
-        print('Posterior-mean chi2 per dof: ')
-        print(np.mean(chi2) / numbdoff)
-        print('Minimum chi2: ')
-        print(np.amin(chi2))
-        print('Minimum chi2 per dof: ')
-        print(np.amin(chi2) / numbdoff)
-        print('Posterior-mean llik: ')
-        print(np.mean(objtsave.lnprobability))
-        print('Maximum llik: ')
-        print(np.amax(objtsave.lnprobability))
-    
-    ### nested sampling specific
-    if samptype == 'nest':
+        ### nested sampling specific
         rfig, raxes = dyplot.runplot(results)
         path = gdat.pathimag + '%s/dyne_runs_%s.pdf' % (samptype, ttvrtype)
         print('Writing to %s...' % path)
