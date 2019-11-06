@@ -736,6 +736,16 @@ def init():
     gdat.limtpara = np.empty((2, numbpara))
     numbdoff = numbdata - numbpara
     
+    timetranthis = gdat.meanperiline 
+    minmtime = 2458796
+    maxmtime = 2458810
+    for j in gdat.indxplan:
+        print(j)
+        for n in np.arange(-1000, 1000):
+            timetran = gdat.meanperiline[j] * n + gdat.meanepocline[j]
+            if timetran > minmtime and timetran < maxmtime: 
+                print(timetran)
+
     gdat.numbparaplan = 7
     gdat.indxparaplan = np.arange(gdat.numbparaplan)
     gdat.meanparaplan = np.empty((gdat.numbplan, gdat.numbparaplan))
@@ -827,6 +837,9 @@ def init():
     timetranwind = [[] for j in gdat.indxplan]
     timetranwind[0] = [np.array([])]
     timetranwind[1] = np.array([
+                                  2458797.034958, \
+                                  2458802.695130, \
+                                  2458808.355302, \
                                   2458830.995990, \
                                   2458836.656162, \
                                   2458842.316334, \
@@ -856,6 +869,7 @@ def init():
                                   2459080.043558, \
                                  ])
     timetranwind[2] = np.array([
+                                  2458799.362400, \
                                   2458890.403520, \
                                   2458901.783660, \
                                   2458924.543940, \
@@ -869,6 +883,7 @@ def init():
                                   2459061.105620, \
                                   2459072.485760, \
                                  ])
+
     for j in gdat.indxplan:
         if j == 0:
             continue
