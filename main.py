@@ -1,5 +1,5 @@
 """
-Analysis of short-time scale (i.e., no linear or larger term, only periodic) TTVs
+Measurement and analysis of TTVs
 
 Tansu Daylan
 MIT Kavli Institute, Cambridge, MA, 02109, US
@@ -12,11 +12,7 @@ import scipy
 import h5py 
 import os, sys
 
-import emcee
-
-import pickle
 import astropy
-import multiprocessing
 
 import ttvfast
 
@@ -25,13 +21,7 @@ from tdpy.util import summgene
 import tdpy
 
 import matplotlib as mpl
-import matplotlib.gridspec as gridspec
 from matplotlib import pyplot as plt
-mpl.rc('image', interpolation='none', origin='lower')
-mpl.rcParams['figure.figsize'] = (6., 5.)
-mpl.rcParams['text.usetex'] = True
-mpl.rcParams['text.latex.preamble'] = [r'\usepackage{amsmath}'] #for \text command
-import time
 
 import allesfitter
 
@@ -64,7 +54,7 @@ def exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptm
     objtfilesave.close()
     
     numbplan = len(liststrgplan)
-    indxplan = np.arange(numbplan)
+    indxplan = np.arange(numbplan, dtype=int)
     
     numbtran = np.empty(numbplan, dtype=int)
     indxtran = []
@@ -94,8 +84,6 @@ def exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptm
         minmtime = min(np.amin(time[strginst]), minmtime)
         maxmtime = max(np.amax(time[strginst]), maxmtime)
     limttime = [minmtime, maxmtime]
-    numbplan = len(liststrgplan)
-    indxplan = np.arange(numbplan)
     indxtranskip = [[] for k in indxplan]
     for k, strgplan in enumerate(liststrgplan):
         for l in indxtran[k]:
@@ -125,7 +113,7 @@ def exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptm
             
             for m, strginst in enumerate(liststrginst):
                 if booltraninst[m]:
-                    path = '%s%s_%s.csv' % (pathtran, strginst, gdat.modltype)
+                    path = '%s%s.csv' % (pathtran, strginst)
                     print('Writing to %s...' % path)
                     np.savetxt(path, arry[strginst][indx[strginst], :], delimiter=',')
     
@@ -250,174 +238,7 @@ def exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptm
     objtfile.close()
 
 
-def icdf(para, gdat, ttvrtype):
-    
-    icdf = gdat.limtpara[0, :] + para * (gdat.limtpara[1, :] - gdat.limtpara[0, :])
-
-    return icdf
-
-
-def retr_lpos(para, gdat, ttvrtype):
-    
-    if ((para < gdat.limtpara[0, :]) | (para > gdat.limtpara[1, :])).any():
-        lpos = -np.inf
-    else:
-        llik = retr_llik(para, gdat, ttvrtype)
-        lpos = llik
-    
-    return lpos
-
-
-def retr_ttvrmodl_sinu(time, offs, phas, ampl, peri):
-    
-    ttvrmodl = offs + ampl * np.sin(phas + 2. * np.pi * time / peri)
-
-    return ttvrmodl
-
-
-def retr_llik_sinu(para, time, numbepoc, ttvrobsv, ttvrstdvobsv, ttvrtype):
-    
-    offs = para[0]
-    if ttvrtype == 'cons':
-        ttvrmodl = offs * np.ones_like(time)
-    if ttvrtype == 'sinu':
-        phas = para[1]
-        ampl = para[2]
-        peri = para[3]
-        ttvrmodl = retr_ttvrmodl(time, offs, phas, ampl, peri)
-    
-    llik = -0.5 * np.sum((ttvrmodl - ttvrobsv)**2 / ttvrstdvobsv**2)
-    
-    return llik
-
-
-def init_sinu():
-    
-    # From Table 2
-    epoc = 2458375.169883
-    peri = 0.9414526
-    
-    # get Luke's posterior
-    path = pathdata + 'WASP-18b_literature_and_TESS_times_O-C_vs_epoch_selected.csv'
-    objtfile = open(path, 'r')
-    tesspost = np.empty((44, 5))
-    for k, line in enumerate(objtfile):
-        if k < 12:
-            continue
-        linesplt = line.split(';')
-        tesspost[k-12, :] = linesplt[:-2]
-    indxepocobsv = tesspost[:, 0]
-    ttvrobsv = (tesspost[:, 2] - epoc - peri * (indxepocobsv - 396)) * 24. * 60.
-    ttvrstdvobsv = tesspost[:, 4]
-    
-    numbepoc = indxepocobsv.size
-    indxepoc = np.arange(numbepoc)
-    
-    time = np.copy(indxepocobsv)
-    
-    listttvrtype = ['cons', 'sinu']
-    for ttvrtype in listttvrtype:
-        if ttvrtype == 'cons':
-            numbpara = 1
-        if ttvrtype == 'sinu':
-            numbpara = 4
-        
-        indxpara = np.arange(numbpara)
-        limtpara = np.empty((2, numbpara))
-        # offs
-        limtpara[0, 0] = -0.2
-        limtpara[1, 0] = 0.2
-        listlablpara = ['$C$ [minutes]']
-        if ttvrtype == 'sinu':
-            # phas
-            limtpara[0, 1] = 0.#np.pi
-            limtpara[1, 1] = 2. * np.pi
-            # ampl
-            limtpara[0, 2] = 0.
-            limtpara[1, 2] = 1.
-            # peri
-            limtpara[0, 3] = 2.
-            limtpara[1, 3] = 15.
-        
-            listlablpara += ['$\phi$', '$A$ [minutes]', '$P$ [epochs]']
-        
-        numbbins = 60
-        indxbins = np.arange(numbbins)
-        binspara = np.empty((numbbins + 1, numbpara)) 
-        for k in indxpara:
-            binspara[:, k] = np.linspace(limtpara[0, k], limtpara[1, k], numbbins + 1)
-        meanpara = (binspara[1:, :] + binspara[:-1, :]) / 2.
-    
-        dictllik = [time, numbepoc, ttvrobsv, ttvrstdvobsv, ttvrtype]
-        dicticdf = [numbepoc]
-        
-        # plot the posterior
-        ## parameter
-        ### trace
-        plot_trac(gdat, objtsave)
-            
-        path = pathdata + '%s/' % samptype
-        strgplot = 'post_%s' % ttvrtype
-    
-        tdpy.mcmc.plot_grid(path, strgplot, listsamp, listlablpara, listvarbdraw=[listparamlik], numbbinsplot=numbbins)
-        
-        ### sample model ttvr
-        numbttvrmodl = 100
-        indxttvrmodl = np.arange(numbttvrmodl)
-        indxsamprand = np.random.choice(indxsamp, numbttvrmodl, replace=False)
-        yerr = np.empty((2, numbepoc))
-        yerr[0, :] = ttvrstdvobsv
-        yerr[1, :] = ttvrstdvobsv
-        
-        numbepocfine = 1000
-        indxepocfine = np.linspace(np.amin(indxepocobsv), np.amax(indxepocobsv), numbepocfine)
-        ttvrmodlfine = np.empty((numbsamp, numbepocfine))
-        for k in indxttvrmodl:
-            objttemp = objtsave.flatchain
-            offs = objttemp[indxsamprand[k], 0]
-            if ttvrtype == 'cons':
-                ttvrmodlfine[k, :] = offs * np.ones_like(indxepocfine)
-            if ttvrtype == 'sinu':
-                phas = objttemp[k, 1]
-                ampl = objttemp[k, 2]
-                peri = objttemp[k, 3]
-                ttvrmodlfine[k, :] = retr_ttvrmodl(indxepocfine, offs, phas, ampl, peri)
-        
-        if ttvrtype == 'cons':
-            mlikcons = np.amax(listllik)
-    
-        if ttvrtype == 'sinu':
-            llikperi = np.empty(numbbins)
-            for m in indxbins:
-                indxsampthis = np.where((listsamp[:, -1] < binspara[m+1, -1]) & (listsamp[:, -1] > binspara[m, -1]))
-                llikperi[m] = np.amax(listllik[indxsampthis])
-            
-            figr, axis = plt.subplots(figsize=(6, 3))
-            axis.plot(meanpara[:, -1], -2. * llikperi, label='Sinusoidal')
-            axis.axhline(-2. * mlikcons, label='Constant', color='orange')
-            axis.set_xlabel('Period [epochs]')
-            axis.set_ylabel('$\chi^2$')
-            plt.tight_layout()
-            plt.legend()
-            path = pathdata + '%s/chi2peri_%s.pdf' % (samptype, ttvrtype)
-            print('Writing to %s...' % path)
-            plt.savefig(path)
-            plt.close()
-        
-        figr, axis = plt.subplots(figsize=(6, 3))
-        axis.errorbar(indxepocobsv, ttvrobsv, yerr=yerr, color='black', marker='o', ls='')
-        for k in indxttvrmodl:
-            axis.plot(indxepocfine, ttvrmodlfine[k, :], alpha=0.05, color='b')
-        axis.set_xlabel('Epoch')
-        axis.set_ylabel('Transit timing residuals [minute]')
-        plt.tight_layout()
-        path = pathdata + '%s/modl_%s.pdf' % (samptype, ttvrtype)
-        print('Writing to %s...' % path)
-        plt.savefig(path)
-        plt.close()
-        
-
-def plot_ttvr(gdat, ttvrtype, listvarb):
+def plot_ttvr(gdat, modltype, listvarb):
     
     listindxtranmodl, listtimetranmodl, listindxtranmodlproj, listtimetranmodlproj = listvarb
 
@@ -430,7 +251,7 @@ def plot_ttvr(gdat, ttvrtype, listvarb):
     figrsize = (12, 8)
     
     figr = plt.figure(figsize=figrsize)
-    gs = gridspec.GridSpec(gdat.numbplan, 2, width_ratios=[1, 2])
+    gs = mpl.gridspec.GridSpec(gdat.numbplan, 2, width_ratios=[1, 2])
     axis = [[[] for a in range(2)] for j in gdat.indxplan]
     for a in range(2):
         for j in gdat.indxplan:
@@ -500,13 +321,20 @@ def plot_ttvr(gdat, ttvrtype, listvarb):
     axis[0][1].legend()
     
     plt.tight_layout()
-    path = gdat.pathimag + 'timetran_%s_%s_%s.pdf' % (strgplot, ttvrtype, gdat.modltype)
+    path = gdat.pathimag + 'timetran_%s_%s_%s.pdf' % (strgplot, modltype, gdat.modltype)
     print('Writing to %s...' % path)
     plt.savefig(path)
     plt.close()
 
 
-def retr_modl(para, gdat, ttvrtype):
+def retr_modl_sinu(time, offs, phas, ampl, peri):
+    
+    ttvrmodl = offs + ampl * np.sin(phas + 2. * np.pi * time / peri)
+
+    return ttvrmodl
+
+
+def retr_modl_full(para, gdat, modltype):
     
     indxtranmodl = [[] for j in gdat.indxplan]
     timetranmodl = [[] for j in gdat.indxplan]
@@ -540,11 +368,11 @@ def retr_modl(para, gdat, ttvrtype):
             #planet b
             mass[0],# mass of the planet
             peri[0],# period of the planet
-            ecce[0],# mass of the planet
-            incl[0],# period of the planet
-            land[0],# mass of the planet
-            argu[0],# period of the planet
-            anom[0],# mass of the planet
+            ecce[0],# eccentricity s of the planet
+            incl[0],# inclination of the planet
+            land[0],# longitude of the ascending node, Omega
+            argu[0],# argument of periapsis, omega
+            anom[0],# mean anomaly of the planet
             
             
             #planet c
@@ -617,14 +445,37 @@ def retr_modl(para, gdat, ttvrtype):
     
     return indxtranmodl, timetranmodl, indxtranmodlproj, timetranmodlproj
             
-
-def retr_llik(para, gdat, ttvrtype):
     
-    indxtranmodl, timetranmodl, indxtranmodlproj, timetranmodlproj = retr_modl(para, gdat, ttvrtype)
+def retr_ttvrmodlline(gdat, epocline, periline):
 
+    timetranmodlproj = [[] for j in gdat.indxplan]
     for j in gdat.indxplan:
-        if timetranmodlproj[j].size < gdat.timetranobsd[j].size:
-            return -np.inf
+        timetranmodlproj[j] = epocline + periline * np.ones_like(gdat.timetranobsd[j])
+    
+    return timetranmodlproj
+
+
+def retr_llik(gdat, para):
+    
+    if gdat.modltype == 'line' or gdat.modltype == 'sinu':
+        if gdat.modltype == 'line':
+            epocline = para[0]
+            periline = para[1]
+            timetranmodlproj = retr_ttvrmodlline(gdat, epocline, periline)
+        
+        if gdat.modltype == 'sinu':
+            epocline = para[0]
+            periline = para[1]
+            phassinu = para[2]
+            amplsinu = para[3]
+            perisinu = para[4]
+            timetranmodlproj = retr_ttvrmodlsinu(gdat, epocline, periline, phassinu, amplsinu, perisinu)
+    else:
+        indxtranmodl, timetranmodl, indxtranmodlproj, timetranmodlproj = retr_modl(para, gdat)
+
+        for j in gdat.indxplan:
+            if timetranmodlproj[j].size < gdat.timetranobsd[j].size:
+                return -np.inf
     
     llik = 0.
     for j in gdat.indxplan:
@@ -658,31 +509,323 @@ def retr_llik(para, gdat, ttvrtype):
     return llik
 
 
-def init():
+def init(
+         # data
+         timetranobsd, \
+         stdvtimetranobsd, \
+
+         # model
+         minmpara, \
+         maxmpara, \
+         meanpara, \
+         stdvpara, \
+
+         timeobsdinit=None, \
+        
+         ## TTV model tyye: 'nbod', 'line' or 'sinu'
+         listmodltype = ['line', 'nbod'], \
+         # strings for the list of planets
+         liststrgplan=None, \
+         
+         ## if eccentricity is included
+         maxmecce = 0.1, \
+        
+        ):
     
-    # global object
+    # construct global object
     gdat = tdpy.util.gdatstrt()
     
+    # copy unnamed inputs to the global object
+    #for attr, valu in locals().iter():
+    for attr, valu in locals().items():
+        if '__' not in attr and attr != 'gdat':
+            setattr(gdat, attr, valu)
+
     # paths
     gdat.pathbase = os.environ['TTVR_DATA_PATH'] + '/'
     gdat.pathdata = gdat.pathbase + 'data/'
     gdat.pathimag = gdat.pathbase + 'imag/'
     
-    gdat.numbplan = 3
+    gdat.numbplan = len(gdat.meanpara)
     gdat.indxplan = np.arange(gdat.numbplan)
     
     gdat.facttime = 24. * 60.
     
-    gdat.timeobsdinit = 2458387.0927381925
-    
     # setup 
-    samptype = 'emce'
     gdat.diagmode = True
     
-    gdat.liststrgplan = ['b', 'c', 'd']
+    if gdat.liststrgplan is None:
+        gdat.liststrgplan = ['b', 'c', 'd'][:gdat.numbplan]
    
+    gdat.inittimefastttvr = 0
+    gdat.delttimefastttvr = 0.03
+    gdat.numbstepfastttvr = 700
+    
+    # The function ttvfast.ttvfast returns a dictionary containing positions and rv. The positions entry is a tuple of:
+    # a list of integer indices for which values correspond to which planet,
+    # a list of integers defining the epoch,
+    # a list of times,
+    # a list of rsky values, and
+    # a list of vsky values.
+    
+    gdat.numbtranoffs = [22, 13, 7]
+    #for j in gdat.indxplan:
+    #    gdat.timetranlineproj[j] = gdat.meanepocline[j] + (gdat.indxtranobsd[j] - gdat.numbtranoffs[j]) * gdat.meanperiline[j] - gdat.timeobsdinit
+    
+    numbsampwalk = 15000
+    numbsampburnwalk = 5000
+    numbsampburnwalkseco = 5000
+      
+    # number of total data points
+    numbdata = 0
+    for j in gdat.indxplan:
+        numbdata += gdat.timetranobsd[j].size
+        
+    for y, gdat.modltype in enumerate(gdat.listmodltype):
+
+        listlablpara = []
+        if gdat.modltype == 'line':
+            listlistlablpara = [['E', ' [day]'], ['P', ' [day]']]
+        if gdat.modltype == 'sinu':
+            # temp
+            listlistlablpara = [['E', ' [day]'], ['P', ' [day]']]
+        if gdat.modltype == 'nbod':
+            listlistlablpara = [['M', ' [$M_{\odot}$]'], ['P', ' [day]'], ['\epsilon', ''], ['i', ' [deg]'], ['\Omega', ' [deg]'], \
+                                                                                                ['\omega', ' [deg]'], ['A', ' [deg]']]
+        gdat.numbparaplan = len(listlistlablpara)
+        for strgfrst, strgseco in listlistlablpara:
+            for j in gdat.indxplan:
+                listlablpara.append('$%s_%s$%s' % (strgfrst, gdat.liststrgplan[j], strgseco))
+        numbpara = len(listlablpara)
+        indxpara = np.arange(numbpara)
+        numbdoff = numbdata - numbpara
+        
+        # impose priors
+        gdat.indxparaplan = np.arange(gdat.numbparaplan)
+        numbbins = 20
+        
+        gdat.numbpara = gdat.numbplan * gdat.numbparaplan
+        gdat.indxpara = np.arange(gdat.numbpara)
+        numbwalk = 2 * numbpara
+        indxwalk = np.arange(numbwalk)
+        
+        #gdat.initindxtranmodl, gdat.inittimetranmodl, \
+        #        gdat.initindxtranmodlproj, gdat.inittimetranmodlproj = retr_modl_full(gdat.meanparainit, gdat, modltype)
+        #listvarb = [[gdat.initindxtranmodl], [gdat.inittimetranmodl], [gdat.initindxtranmodlproj], [gdat.inittimetranmodlproj]]
+        
+
+        listscalpara = ['self' for k in gdat.indxpara]
+        print('gdat.minmpara')
+        summgene(gdat.minmpara)
+        print('listlablpara')
+        print(listlablpara)
+        parapost = tdpy.mcmc.samp(gdat, gdat.pathimag, numbsampwalk, numbsampburnwalk, numbsampburnwalkseco, retr_llik, \
+                            listlablpara, listscalpara, gdat.minmpara[y], gdat.maxmpara[y], gdat.meanpara[y], gdat.stdvpara[y], numbdata)
+            
+        objtsave = objtsamp
+        
+        for j in gdat.indxplan:
+            if j == 0:
+                continue
+            timetranwind[j] -= gdat.timeobsdinit
+        
+        gdat.parapost = objtsave.flatchain
+        gdat.indxsampfeww = indxsamp[::100]
+        gdat.numbsampfeww = gdat.indxsampfeww.size
+        gdat.sampindxtranmodl = [[] for i in gdat.indxsampfeww]
+        gdat.samptimetranmodl = [[] for i in gdat.indxsampfeww]
+        gdat.sampindxtranmodlproj = [[] for i in gdat.indxsampfeww]
+        gdat.samptimetranmodlproj = [[] for i in gdat.indxsampfeww]
+        sizearry = np.empty((gdat.numbsampfeww, gdat.numbplan), dtype=int)
+        listtemptemp = [[[] for i in gdat.indxsampfeww] for j in gdat.indxplan]
+        for ii, i in enumerate(gdat.indxsampfeww):
+            gdat.sampindxtranmodl[ii], gdat.samptimetranmodl[ii], gdat.sampindxtranmodlproj[ii], gdat.samptimetranmodlproj[ii] = \
+                                                                                                        retr_modl(gdat.parapost[i, :], gdat)
+            for j in gdat.indxplan:
+                listtemptemp[j][ii] = gdat.samptimetranmodl[ii][j]
+                sizearry[ii, j] = gdat.samptimetranmodl[ii][j].size
+        minmsizearry = np.amin(sizearry, 0)
+        gdat.stdvtime = [[] for j in gdat.indxplan]
+        gdat.indxtranstdv = [[] for j in gdat.indxplan]
+        for j in gdat.indxplan:
+            listtemp = np.empty((gdat.numbsampfeww, minmsizearry[j]))
+            for ii, i in enumerate(gdat.indxsampfeww):
+                listtemp[ii, :] = listtemptemp[j][ii][:minmsizearry[j]]
+            gdat.stdvtime[j] = np.std(listtemp, 0) * gdat.facttime
+            gdat.indxtranstdv[j] = np.arange(minmsizearry[j])#gdat.sampindxtranmodl[i][j][minmsizearry[j]]
+
+        listvarb = [gdat.sampindxtranmodl, gdat.samptimetranmodl, gdat.sampindxtranmodlproj, gdat.samptimetranmodlproj]
+        plot_ttvr(gdat, gdat.modltype, listvarb)
+        
+        numbsampfeww = gdat.indxsampfeww.size
+
+        for j in gdat.indxplan:
+            # temp
+            if j == 0:
+                continue
+            numbtranwind = timetranwind[j].size
+            timetranwindpred = np.empty((numbtranwind, numbsampfeww))
+            for k, timetran in enumerate(timetranwind[j]):
+                for i in range(numbsampfeww):
+                    indx = np.argmin(np.abs(gdat.samptimetranmodl[i][j] - timetran))
+                    timetranwindpred[k, i] = gdat.samptimetranmodl[i][j][indx]
+
+                print('%f %f %g %g' % (gdat.timeobsdinit + timetranwind[j][k], gdat.timeobsdinit + np.mean(timetranwindpred[k, :]), \
+                                                                                        np.std(timetranwindpred[k, :]) * gdat.facttime, \
+                                                                                        (np.mean(timetranwindpred[k, :]) - timetran) * gdat.facttime))
+
+        if numbsamp != numbsampwalk * numbwalk:
+            raise Exception('')
+
+        listsamp = objtsave.flatchain
+        listllik = objtsave.flatlnprobability
+        
+        listlpos = objtsave.lnprobability
+        chi2 = -2. * listlpos
+        
+        listsampproc = np.empty((gdat.numbsampfeww, gdat.numbplan))
+        for j in gdat.indxplan:
+            for ii, i in enumerate(gdat.indxsampfeww):
+                listsampproc[ii, j] = gdat.samptimetranmodl[ii][j][40]
+            listsampproc[:, j] -= np.mean(listsampproc[:, j])
+            listsampproc[:, j] *= gdat.facttime
+            listlablpara.append('T_{p,%s}' % gdat.liststrgplan[j])
+        
+        print('Minimum chi2: ')
+        print(np.amin(chi2))
+        print('Minimum chi2 per dof: ')
+        print(np.amin(chi2) / numbdoff)
+        print('Maximum aposterior: ')
+        print(np.amax(listlpos))
+        
+
+def cnfg_WASP4():
+    
+    # get Luke's posterior
+    path = pathdata + 'WASP-18b_literature_and_TESS_times_O-C_vs_epoch_selected.csv'
+    objtfile = open(path, 'r')
+    tesspost = np.empty((44, 5))
+    for k, line in enumerate(objtfile):
+        if k < 12:
+            continue
+        linesplt = line.split(';')
+        tesspost[k-12, :] = linesplt[:-2]
+    indxepocobsv = tesspost[:, 0]
+    ttvrobsv = (tesspost[:, 2] - epoc - peri * (indxepocobsv - 396)) * 24. * 60.
+    ttvrstdvobsv = tesspost[:, 4]
+    
+    numbepoc = indxepocobsv.size
+    indxepoc = np.arange(numbepoc)
+    
+    time = np.copy(indxepocobsv)
+    
+    listmodltype = ['line', 'sinu']
+    for modltype in listmodltype:
+        
+        indxpara = np.arange(numbpara)
+        limtpara = np.empty((2, numbpara))
+        # offs
+        limtpara[0, 0] = -0.2
+        limtpara[1, 0] = 0.2
+        listlablpara = ['$C$ [minutes]']
+        if modltype == 'sinu':
+            # phas
+            limtpara[0, 1] = 0.#np.pi
+            limtpara[1, 1] = 2. * np.pi
+            # ampl
+            limtpara[0, 2] = 0.
+            limtpara[1, 2] = 1.
+            # peri
+            limtpara[0, 3] = 2.
+            limtpara[1, 3] = 15.
+        
+            listlablpara += ['$\phi$', '$A$ [minutes]', '$P$ [epochs]']
+        
+        numbbins = 60
+        indxbins = np.arange(numbbins)
+        binspara = np.empty((numbbins + 1, numbpara)) 
+        for k in indxpara:
+            binspara[:, k] = np.linspace(limtpara[0, k], limtpara[1, k], numbbins + 1)
+        meanpara = (binspara[1:, :] + binspara[:-1, :]) / 2.
+    
+        dictllik = [time, numbepoc, ttvrobsv, ttvrstdvobsv, modltype]
+        dicticdf = [numbepoc]
+        
+        # plot the posterior
+        ## parameter
+        ### trace
+            
+        path = pathdata + '%s/' % samptype
+        strgplot = 'post_%s' % modltype
+    
+        ### sample model ttvr
+        numbttvrmodl = 100
+        indxttvrmodl = np.arange(numbttvrmodl)
+        indxsamprand = np.random.choice(indxsamp, numbttvrmodl, replace=False)
+        yerr = np.empty((2, numbepoc))
+        yerr[0, :] = ttvrstdvobsv
+        yerr[1, :] = ttvrstdvobsv
+        
+        numbepocfine = 1000
+        indxepocfine = np.linspace(np.amin(indxepocobsv), np.amax(indxepocobsv), numbepocfine)
+        ttvrmodlfine = np.empty((numbsamp, numbepocfine))
+        for k in indxttvrmodl:
+            objttemp = objtsave.flatchain
+            offs = objttemp[indxsamprand[k], 0]
+            if modltype == 'line':
+                ttvrmodlfine[k, :] = offs * np.ones_like(indxepocfine)
+            if modltype == 'sinu':
+                phas = objttemp[k, 1]
+                ampl = objttemp[k, 2]
+                peri = objttemp[k, 3]
+                ttvrmodlfine[k, :] = retr_ttvrmodl(indxepocfine, offs, phas, ampl, peri)
+        
+        if modltype == 'line':
+            mlikcons = np.amax(listllik)
+    
+        if modltype == 'sinu':
+            llikperi = np.empty(numbbins)
+            for m in indxbins:
+                indxsampthis = np.where((listsamp[:, -1] < binspara[m+1, -1]) & (listsamp[:, -1] > binspara[m, -1]))
+                llikperi[m] = np.amax(listllik[indxsampthis])
+            
+            figr, axis = plt.subplots(figsize=(6, 3))
+            axis.plot(meanpara[:, -1], -2. * llikperi, label='Sinusoidal')
+            axis.axhline(-2. * mlikcons, label='Constant', color='orange')
+            axis.set_xlabel('Period [epochs]')
+            axis.set_ylabel('$\chi^2$')
+            plt.tight_layout()
+            plt.legend()
+            path = pathdata + '%s/chi2peri_%s.pdf' % (samptype, modltype)
+            print('Writing to %s...' % path)
+            plt.savefig(path)
+            plt.close()
+        
+        figr, axis = plt.subplots(figsize=(6, 3))
+        axis.errorbar(indxepocobsv, ttvrobsv, yerr=yerr, color='black', marker='o', ls='')
+        for k in indxttvrmodl:
+            axis.plot(indxepocfine, ttvrmodlfine[k, :], alpha=0.05, color='b')
+        axis.set_xlabel('Epoch')
+        axis.set_ylabel('Transit timing residuals [minute]')
+        plt.tight_layout()
+        path = pathdata + '%s/modl_%s.pdf' % (samptype, modltype)
+        print('Writing to %s...' % path)
+        plt.savefig(path)
+        plt.close()
+        
+
+def cnfg_TOI270():
+    
+    timeobsdinit = 2458387.0927381925
+    
+    # perform allesfitter run
+    boolalle = False
+
     # relevant transit times
-    timetranwind = [[] for j in gdat.indxplan]
+    liststrgplan = ['b', 'c', 'd']
+    numbplan = len(liststrgplan)
+    indxplan = np.arange(numbplan, dtype=int)
+    timetranwind = [[] for j in indxplan]
     timetranwind[0] = [np.array([])]
     timetranwind[1] = np.array([
                                   2458797.034958, \
@@ -731,314 +874,119 @@ def init():
                                   2459061.105620, \
                                   2459072.485760, \
                                  ])
-
-    # get data
-    gdat.meanepocline = np.array([1461.01464, 1463.08481, 1469.33834]) + 2457000
-    gdat.meanperiline = np.array([3.360080, 5.660172, 11.38014])
     
-    path = gdat.pathdata + 'measured_allesfit_all_ttv.pickle'
+    import pickle
+    pathdata = os.environ['TTVR_DATA_PATH'] + '/data/'
+    path = pathdata + 'measured_allesfit_all_ttv.pickle'
     objtfile = open(path,'rb')
     datapickttvr = pickle.load(objtfile)
-    gdat.indxtranobsd = [[] for j in gdat.indxplan]
-    gdat.timetranlineproj = [[] for j in gdat.indxplan]
-    gdat.timetranobsd = [[] for j in gdat.indxplan]
-    gdat.stdvtimetranobsd = [[] for j in gdat.indxplan]
-    for j in gdat.indxplan:
-        #gdat.meanperiline[j] = datapickttvr[gdat.liststrgplan[j]]['lin_period']
-        gdat.timetranobsd[j] = datapickttvr[gdat.liststrgplan[j]]['transit_time']
-        gdat.stdvtimetranobsd[j] = datapickttvr[gdat.liststrgplan[j]]['transit_time_err']
+    indxtranobsd = [[] for j in indxplan]
+    timetranlineproj = [[] for j in indxplan]
+    timetranobsd = [[] for j in indxplan]
+    stdvtimetranobsd = [[] for j in indxplan]
+    for j in indxplan:
+        #meanperiline[j] = datapickttvr[liststrgplan[j]]['lin_period']
+        timetranobsd[j] = datapickttvr[liststrgplan[j]]['transit_time']
+        stdvtimetranobsd[j] = datapickttvr[liststrgplan[j]]['transit_time_err']
         if j == 1:
-            gdat.timetranobsd[j] = np.concatenate((gdat.timetranobsd[j], np.array([2458780.0690228315, 2458797.054231985])))
-            gdat.stdvtimetranobsd[j] = np.concatenate((gdat.stdvtimetranobsd[j], np.array([0.0011934256181120872, 0.0006028260104358196])))
+            timetranobsd[j] = np.concatenate((timetranobsd[j], np.array([2458780.0690228315, 2458797.054231985])))
+            stdvtimetranobsd[j] = np.concatenate((stdvtimetranobsd[j], np.array([0.0011934256181120872, 0.0006028260104358196])))
         if j == 2:
-            gdat.timetranobsd[j] = np.concatenate((gdat.timetranobsd[j], np.array([2458799.350335964])))
-            gdat.stdvtimetranobsd[j] = np.concatenate((gdat.stdvtimetranobsd[j], np.array([0.001056972425431013])))
-        gdat.timetranobsd[j] -= gdat.timeobsdinit
-
-    ttvrtype = 'totl'
-
-    for j in gdat.indxplan:
-        gdat.indxtranobsd[j] = np.round(gdat.timetranobsd[j] / gdat.meanperiline[j]).astype(int)
-    
-    # convert Earth mass to Solar mass
+            timetranobsd[j] = np.concatenate((timetranobsd[j], np.array([2458799.350335964])))
+            stdvtimetranobsd[j] = np.concatenate((stdvtimetranobsd[j], np.array([0.001056972425431013])))
+        timetranobsd[j] -= timeobsdinit
     
     # setttings
     ## modeling 
-    boolecce = False
-    maxmecce = 0.1
-    gdat.inittimefastttvr = 0
-    gdat.delttimefastttvr = 0.03
-    gdat.numbstepfastttvr = 700
-    
-    # run the TTV Simulation
-    
-    # The function ttvfast.ttvfast returns a dictionary containing positions and rv. The positions entry is a tuple of:
-    # a list of integer indices for which values correspond to which planet,
-    # a list of integers defining the epoch,
-    # a list of times,
-    # a list of rsky values, and
-    # a list of vsky values.
-    
-    gdat.numbtranoffs = [22, 13, 7]
-    for j in gdat.indxplan:
-        gdat.timetranlineproj[j] = gdat.meanepocline[j] + (gdat.indxtranobsd[j] - gdat.numbtranoffs[j]) * gdat.meanperiline[j] - gdat.timeobsdinit
-    
-    numbsampwalk = 15000
-    indxsampwalk = np.arange(numbsampwalk)
-    numbsampburnwalk = 3000
-      
-    # number of total data points
-    numbdata = 0
-    for j in gdat.indxplan:
-        numbdata += gdat.indxtranobsd[j].size
-        
-    for l in range(2):
-        
-        if l == 0:
-            gdat.modltype = 'line'
-        if l == 1:
-            gdat.modltype = 'nbod'
+    # get data
+    meanepocline = np.array([1461.01464, 1463.08481, 1469.33834]) + 2457000
+    meanperiline = np.array([3.360080, 5.660172, 11.38014])
 
-        listlablpara = []
-        if l == 0:
-            listlistlablpara = [['E', ' [day]'], ['P', ' [day]']]
-        if l == 1:
-            listlistlablpara = [['M', ' [$M_{\odot}$]'], ['P', ' [day]'], ['\epsilon', ''], ['i', ' [deg]'], ['\Omega', ' [deg]'], \
-                                                                                                ['\omega', ' [deg]'], ['A', ' [deg]']]
-        for strgfrst, strgseco in listlistlablpara:
-            for j in gdat.indxplan:
-                listlablpara.append('$%s_%s$%s' % (strgfrst, gdat.liststrgplan[j], strgseco))
-        numbpara = len(listlablpara)
-        indxpara = np.arange(numbpara)
-        gdat.limtpara = np.empty((2, numbpara))
-        numbdoff = numbdata - numbpara
-        
-        timetranthis = gdat.meanperiline 
-        minmtime = 2458796
-        maxmtime = 2458810
-        for j in gdat.indxplan:
-            print(j)
-            for n in np.arange(-1000, 1000):
-                timetran = gdat.meanperiline[j] * n + gdat.meanepocline[j]
-                if timetran > minmtime and timetran < maxmtime: 
-                    print(timetran)
-        
-        if l == 0:
-            gdat.numbparaplan = 2
+    numbparaplan = 7
+    numbconf = 2
+    indxconf = np.arange(numbconf)
+    minmpara = [[] for k in indxconf]
+    maxmpara = [[] for k in indxconf]
+    meanpara = [[] for k in indxconf]
+    stdvpara = [[] for k in indxconf]
+    
+    for k in indxconf:
+        if k == 0:
+            numbparaplanconf = 2
         else:
-            gdat.numbparaplan = 7
-        
-        # impose priors
-        gdat.indxparaplan = np.arange(gdat.numbparaplan)
-        gdat.meanparaplan = np.empty((gdat.numbplan, gdat.numbparaplan))
-        gdat.stdvparaplan = np.empty((gdat.numbplan, gdat.numbparaplan))
-        if l == 0:
-            gdat.meanparaplan[:, 0] = np.array([gdat.timetranobsd[j][0] for j in gdat.indxplan])
-            print('gdat.meanparaplan[:, 0]')
-            print(gdat.meanparaplan[:, 0])
-            gdat.stdvparaplan[:, 0] = 1e-2
+            numbparaplanconf = 7
+        numbparaconf = numbparaplanconf * numbplan
+        minmpara[k] = np.empty(numbparaconf)
+        maxmpara[k] = np.empty(numbparaconf)
+        meanpara[k] = np.empty(numbparaconf)
+        stdvpara[k] = np.empty(numbparaconf)
+        if k == 0:
+            meanpara[k][indxplan] = np.array([timetranobsd[j][0] for j in indxplan])
+            stdvpara[k][indxplan] = 1e-2
             
-            gdat.meanparaplan[:, 1] = gdat.meanperiline
-            gdat.stdvparaplan[:, 1] = gdat.meanparaplan[:, 1] * 1e-2
-                
+            print('indxplan+numbplan:')
+            print(indxplan+numbplan)
+            print('stdvpara[k]')
+            summgene(stdvpara[k])
+            print('meanpara[k]')
+            summgene(meanpara[k])
+            print('meanperiline')
+            print(meanperiline)
+            meanpara[k][indxplan+numbplan] = meanperiline
+            stdvpara[k][indxplan+numbplan] = meanperiline * 1e-2
+            
         else:
-            gdat.meanparaplan[:, 0] = np.array([2.47, 5.46, 2.55]) * 0.00000300245
-            gdat.stdvparaplan[:, 0] = np.array([0.75, 1.30, 0.91]) * 0.00000300245 * 1e-2
+            meanpara[k][indxplan + numbplan * 0] = np.array([2.47, 5.46, 2.55]) * 0.00000300245
+            stdvpara[k][indxplan + numbplan * 0] = np.array([0.75, 1.30, 0.91]) * 0.00000300245 * 1e-2
             
-            gdat.meanparaplan[:, 1] = gdat.meanperiline
-            gdat.stdvparaplan[:, 1] = gdat.meanparaplan[:, 1] * 1e-2
-                
-            gdat.meanparaplan[:, 2] = np.array([0., 0., 0.]) # ecce
-            gdat.stdvparaplan[:, 2] = gdat.meanparaplan[:, 2] + 1e-2
+            meanpara[k][indxplan + numbplan * 1] = meanperiline
+            stdvpara[k][indxplan + numbplan * 1] = meanpara[k][indxplan + numbplan * 1] * 1e-2
             
-            gdat.meanparaplan[:, 3] = np.array([88.65, 89.53, 89.69]) # incl
-            gdat.stdvparaplan[:, 3] = gdat.meanparaplan[:, 3] * 1e-2
+            meanpara[k][indxplan + numbplan * 2] = np.array([0., 0., 0.]) # ecce
+            stdvpara[k][indxplan + numbplan * 2] = meanpara[k][indxplan + numbplan * 2] * 1e-2
             
-            gdat.meanparaplan[:, 4] = np.array([0., 0., 0.]) # ascending long
-            gdat.stdvparaplan[:, 4] = gdat.meanparaplan[:, 4] + 1e-2
+            meanpara[k][indxplan + numbplan * 3] = np.array([88.65, 89.53, 89.69]) # incl
+            stdvpara[k][indxplan + numbplan * 3] = meanpara[k][indxplan + numbplan * 3] * 1e-2
             
-            gdat.meanparaplan[:, 5] = np.array([0., 0., 0.]) # arg periapsis
-            gdat.stdvparaplan[:, 5] = gdat.meanparaplan[:, 5] + 1e-2
+            meanpara[k][indxplan + numbplan * 4] = np.array([0., 0., 0.]) # ascending long
+            stdvpara[k][indxplan + numbplan * 4] = meanpara[k][indxplan + numbplan * 4] * 1e-2
             
-            gdat.meanparaplan[:, 6] = np.array([89.99999, 296.7324, 8.25829165761]) # mean anomaly
-            gdat.stdvparaplan[:, 6] = gdat.meanparaplan[:, 6] * 1e-2
-        
-        gdat.pathmlik = gdat.pathdata + '%s_mlikpara.csv' % gdat.modltype
-        gdat.boolinitmlik = True
-        if os.path.exists(gdat.pathmlik) and gdat.boolinitmlik:
-            print('Initializing from previous maximum likelihod estimate at %s...' % gdat.pathmlik)
-            data = np.loadtxt(gdat.pathmlik, delimiter=',')
-            for n in gdat.indxparaplan:
-                for j in gdat.indxplan:
-                    gdat.meanparaplan[j, n] = data[j+n*gdat.numbplan]
-
-        for j in gdat.indxplan:
-            for n in gdat.indxparaplan:
-                gdat.limtpara[0, j+n*gdat.numbplan] = gdat.meanparaplan[j, n] - gdat.stdvparaplan[j, n]
-                gdat.limtpara[1, j+n*gdat.numbplan] = gdat.meanparaplan[j, n] + gdat.stdvparaplan[j, n]
-                
-                if n == 2:
-                    gdat.limtpara[0, j+n*gdat.numbplan] = 0.
-
-        numbbins = 20
-        indxbins = np.arange(numbbins)
-        binspara = np.empty((numbbins + 1, numbpara)) 
-        for k in indxpara:
-            binspara[:, k] = np.linspace(gdat.limtpara[0, k], gdat.limtpara[1, k], numbbins + 1)
-        meanpara = (binspara[1:, :] + binspara[:-1, :]) / 2.
-        
-        dictllik = [gdat, ttvrtype]
-        
-        numbwalk = 2 * numbpara
-        indxwalk = np.arange(numbwalk)
-        gdat.parainit = []
-        gdat.meanparainit = (gdat.limtpara[0, :] + gdat.limtpara[1, :]) / 2.
-        for k in indxwalk:
-            gdat.parainit.append(np.empty(numbpara))
-            stdvnorm = (gdat.limtpara[1, :] - gdat.limtpara[0, :]) / 10.
-            if os.path.exists(gdat.pathmlik) and gdat.boolinitmlik:
-                stdvnorm *= 1e-3
-            gdat.parainit[k]  = (scipy.stats.truncnorm.rvs((gdat.limtpara[0, :] - gdat.meanparainit) / stdvnorm, \
-                                                                (gdat.limtpara[1, :] - gdat.meanparainit) / stdvnorm)) * stdvnorm + gdat.meanparainit
-
-        numbsamp = numbsampwalk * numbwalk
-        indxsamp = np.arange(numbsamp)
-        numbsampburn = numbsampburnwalk * numbwalk
-        if gdat.diagmode:
-            if numbsampwalk == 0:
-                raise Exception('')
-        gdat.initindxtranmodl, gdat.inittimetranmodl, \
-                gdat.initindxtranmodlproj, gdat.inittimetranmodlproj = retr_modl(gdat.meanparainit, gdat, ttvrtype)
-        listvarb = [[gdat.initindxtranmodl], [gdat.inittimetranmodl], [gdat.initindxtranmodlproj], [gdat.inittimetranmodlproj]]
-        # temp
-        #objtsamp = emcee.EnsembleSampler(numbwalk, numbpara, retr_lpos, args=dictllik, pool=multiprocessing.Pool())
-        objtsamp = emcee.EnsembleSampler(numbwalk, numbpara, retr_lpos, args=dictllik)
-        if numbsampburnwalk > 0:
-            gdat.parainitburn, prob, state = objtsamp.run_mcmc(gdat.parainit, numbsampburnwalk, progress=True)
-            objtsamp.reset()
-        else:
-            gdat.parainitburn = gdat.parainit
-        objtsamp.run_mcmc(gdat.parainitburn, numbsampwalk, progress=True)
-        objtsave = objtsamp
-        
-        for j in gdat.indxplan:
-            if j == 0:
-                continue
-            timetranwind[j] -= gdat.timeobsdinit
-        
-        gdat.parapost = objtsave.flatchain
-        gdat.indxsampfeww = indxsamp[::100]
-        gdat.numbsampfeww = gdat.indxsampfeww.size
-        gdat.sampindxtranmodl = [[] for i in gdat.indxsampfeww]
-        gdat.samptimetranmodl = [[] for i in gdat.indxsampfeww]
-        gdat.sampindxtranmodlproj = [[] for i in gdat.indxsampfeww]
-        gdat.samptimetranmodlproj = [[] for i in gdat.indxsampfeww]
-        sizearry = np.empty((gdat.numbsampfeww, gdat.numbplan), dtype=int)
-        listtemptemp = [[[] for i in gdat.indxsampfeww] for j in gdat.indxplan]
-        for ii, i in enumerate(gdat.indxsampfeww):
-            gdat.sampindxtranmodl[ii], gdat.samptimetranmodl[ii], gdat.sampindxtranmodlproj[ii], gdat.samptimetranmodlproj[ii] = \
-                                                                                                        retr_modl(gdat.parapost[i, :], gdat, ttvrtype)
-            for j in gdat.indxplan:
-                listtemptemp[j][ii] = gdat.samptimetranmodl[ii][j]
-                sizearry[ii, j] = gdat.samptimetranmodl[ii][j].size
-        minmsizearry = np.amin(sizearry, 0)
-        gdat.stdvtime = [[] for j in gdat.indxplan]
-        gdat.indxtranstdv = [[] for j in gdat.indxplan]
-        for j in gdat.indxplan:
-            listtemp = np.empty((gdat.numbsampfeww, minmsizearry[j]))
-            for ii, i in enumerate(gdat.indxsampfeww):
-                listtemp[ii, :] = listtemptemp[j][ii][:minmsizearry[j]]
-            gdat.stdvtime[j] = np.std(listtemp, 0) * gdat.facttime
-            gdat.indxtranstdv[j] = np.arange(minmsizearry[j])#gdat.sampindxtranmodl[i][j][minmsizearry[j]]
-
-        listvarb = [gdat.sampindxtranmodl, gdat.samptimetranmodl, gdat.sampindxtranmodlproj, gdat.samptimetranmodlproj]
-        plot_ttvr(gdat, ttvrtype, listvarb)
-        
-        numbsampfeww = gdat.indxsampfeww.size
-
-        for j in gdat.indxplan:
-            # temp
-            if j == 0:
-                continue
-            numbtranwind = timetranwind[j].size
-            timetranwindpred = np.empty((numbtranwind, numbsampfeww))
-            for k, timetran in enumerate(timetranwind[j]):
-                for i in range(numbsampfeww):
-                    indx = np.argmin(np.abs(gdat.samptimetranmodl[i][j] - timetran))
-                    timetranwindpred[k, i] = gdat.samptimetranmodl[i][j][indx]
-
-                print('%f %f %g %g' % (gdat.timeobsdinit + timetranwind[j][k], gdat.timeobsdinit + np.mean(timetranwindpred[k, :]), \
-                                                                                        np.std(timetranwindpred[k, :]) * gdat.facttime, \
-                                                                                        (np.mean(timetranwindpred[k, :]) - timetran) * gdat.facttime))
-
-        if numbsamp != numbsampwalk * numbwalk:
-            raise Exception('')
-
-        listsamp = objtsave.flatchain
-        listllik = objtsave.flatlnprobability
-        
-        listlpos = objtsave.lnprobability
-        chi2 = -2. * listlpos
-        
-        # plot the posterior
-        ## parameter
-        ### trace
-        figr, axis = plt.subplots(numbpara + 1, 1, figsize=(12, (numbpara + 1) * 4))
-        for i in indxwalk:
-            axis[0].plot(indxsampwalk, objtsave.lnprobability[:, i])
-        axis[0].set_ylabel('logL')
-        for k in indxpara:
-            for i in indxwalk:
-                axis[k+1].plot(indxsampwalk, objtsave.chain[i, :, k])
-            axis[k+1].set_ylabel(listlablpara[k])
-        path = gdat.pathimag + '%s/trac_%s_%s.png' % (samptype, ttvrtype, gdat.modltype)
-        print('Writing to %s...' % path)
-        plt.savefig(path)
-        plt.close()
+            meanpara[k][indxplan + numbplan * 5] = np.array([0., 0., 0.]) # arg periapsis
+            stdvpara[k][indxplan + numbplan * 5] = meanpara[k][indxplan + numbplan * 5] * 1e-2
             
-        indxsampmlik = np.argmax(listllik)
-        listparamlik = listsamp[indxsampmlik, :]
-        print('Saving the maximum likelihood to %s...' % gdat.pathmlik)
-        np.savetxt(gdat.pathmlik, listparamlik, delimiter=',')
+            meanpara[k][indxplan + numbplan * 6] = np.array([89.99999, 296.7324, 8.25829165761]) # mean anomaly
+            stdvpara[k][indxplan + numbplan * 6] = meanpara[k][indxplan + numbplan * 6] * 1e-2
         
-        path = gdat.pathimag + '%s/' % samptype
-        strgplot = 'post_%s_%s' % (ttvrtype, gdat.modltype)
-        print('path')
-        print(path)
-        tdpy.mcmc.plot_grid(path, strgplot, listsamp, listlablpara, listvarbdraw=[gdat.meanparaplan.flatten()], numbbinsplot=numbbins)
-        
-        listsampproc = np.empty((gdat.numbsampfeww, gdat.numbplan))
-        for j in gdat.indxplan:
-            for ii, i in enumerate(gdat.indxsampfeww):
-                listsampproc[ii, j] = gdat.samptimetranmodl[ii][j][40]
-            listsampproc[:, j] -= np.mean(listsampproc[:, j])
-            listsampproc[:, j] *= gdat.facttime
-            listlablpara.append('T_{p,%s}' % gdat.liststrgplan[j])
-        
-        print('Minimum chi2: ')
-        print(np.amin(chi2))
-        print('Minimum chi2 per dof: ')
-        print(np.amin(chi2) / numbdoff)
-        print('Maximum aposterior: ')
-        print(np.amax(listlpos))
-        
+        minmpara[k] = meanpara[k] - stdvpara[k] * 5.
+        maxmpara[k] = meanpara[k] + stdvpara[k] * 5.
 
-def cnfg_t270():
+    indxtranobsd = [[] for j in indxplan]
+    for j in indxplan:
+        indxtranobsd[j] = np.round(timetranobsd[j] / meanperiline[j]).astype(int)
     
-    pathdata = '/Users/tdaylan/DropboxMITTTT/knownplanets/toi-270/'
-    pathtmpt = '%s/allesfit_tmpt/' % pathdata
-    liststrgplan = ['b', 'c', 'd']
     offs = [17, 10, 5]
     epoc = [2458444.2140459623, 2458446.104473652, 2458446.5783906463]
     peri = [3.360062366764236, 5.660172076246358, 11.38028139190828]
     liststrginst = ['TESS', 'Trappist-South_z_2', 'LCO-SAAO-1m0_ip', 'Trappist-South_z_1', 'LCO_ip', 'LCO-SSO-1m0_ip_1', 'mko-cdk700_g', 'Myers_B']
-    pathtarg = '%s/allesfit_tmpt/' % pathdata
-    exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptmcmc=False)
-
-
-def cnfg_t270_ttvr():
+    pathtmpt = pathdata
+    if boolalle:
+        exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst)
     
-    init()
+    init( \
+         timetranobsd, \
+         stdvtimetranobsd, \
+         minmpara, \
+         maxmpara, \
+         meanpara, \
+         stdvpara, \
+        )
+
+
+def cnfg_TOI1233():
+    
+    timeobsdinit = 2458387.0927381925
+    exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst)
+    
+
 
 globals().get(sys.argv[1])()
-
