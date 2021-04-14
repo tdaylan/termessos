@@ -1,5 +1,5 @@
 """
-Measurement and analysis of TTVs
+Dynamical modeling of exoplanet systems
 
 Tansu Daylan
 MIT Kavli Institute, Cambridge, MA, 02109, US
@@ -22,8 +22,6 @@ import tdpy
 
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-
-import allesfitter
 
 
 def exec_alle_ttvr(pathdata, pathtmpt, epoc, peri, offs, liststrginst, booltmptmcmc=True, liststrgplan=['b']):
