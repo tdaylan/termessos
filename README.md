@@ -1,4 +1,4 @@
-# TTVR (Tools for Transit Timing Variations)
+# termessos
 
 ## Introduction
-TTVR is a pipeline to analyze light curves for Transit Timing Variations (TTVs) and perform dynamical inference using an N-body simulation.
+Pipeline to model Transit Timing Variations (TTVs) in time-domain photometric data
