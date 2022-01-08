@@ -20,7 +20,8 @@ import tdpy.mcmc
 from tdpy.util import summgene
 import tdpy
 
-import matplotlib as mpl
+import matplotlib
+matplotlib.use('agg')
 from matplotlib import pyplot as plt
 
 
